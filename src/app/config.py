@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # Encryption
+    encryption_key: str = "changeme-32-bytes-key-in-prod!!!"  # Must be 32 bytes for AES-256
+
+    # Auth
+    max_login_attempts: int = 5
+    lockout_duration_minutes: int = 15
+    api_key_cache_ttl_seconds: int = 5
+
     # App
     app_name: str = "Makoto LiteLLM"
     debug: bool = False
