@@ -4,7 +4,38 @@
 
 **Goal:** Build a complete authentication, authorization, and multi-tenant management system for an LLM proxy gateway.
 
-**Architecture:** FastAPI application with SQLAlchemy 2.0 async ORM, PostgreSQL database, Redis for rate limiting/caching. Layered architecture: models → services → routes. Auth middleware pipeline processes every request through authenticate → rate limit → budget → model access → route permission checks.
+**Architecture:** Clean Architecture / Hexagonal Architecture (Ports & Adapters) with clear layer boundaries:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  OUTSIDE WORLD (HTTP clients)                               │
+│                                                             │
+│  wire_in (request schemas)  ──▶  ROUTE  ◀──  wire_out      │
+│  Pydantic validates input        │   │       (response      │
+│  at the border                   │   │        schemas)      │
+│                                  │   │                      │
+│                          model_validate()  ← conversion     │
+│                          happens HERE       at the border   │
+├──────────────────────────────────┼───┼──────────────────────┤
+│  SERVICE LAYER (business logic)  │   │                      │
+│  - Receives/returns ORM models   ▼   │                      │
+│  - Knows nothing about HTTP      │   │                      │
+│  - Knows nothing about wire_in/out   │                      │
+│  - Explicit parameters (no **kwargs) │                      │
+├──────────────────────────────────────┼──────────────────────┤
+│  MODEL LAYER (database)              ▼                      │
+│  - SQLAlchemy ORM objects                                   │
+│  - Portable types (Uuid, JSON)                              │
+│  - No business logic                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key architectural principles:**
+- **Wire-in / Wire-out separation:** Request schemas (`schemas/wire_in/`) define what the client sends. Response schemas (`schemas/wire_out/`) define what we send back. They live in separate directories so you always know which direction data flows.
+- **Explicit border conversion:** Routes are the boundary between HTTP and business logic. They explicitly convert ORM models to wire_out schemas using `model_validate()` — no implicit `response_model` magic. Every response goes through a typed schema (no hardcoded dicts).
+- **Services are HTTP-agnostic:** Service functions receive explicit typed parameters and return ORM models. They never see Pydantic schemas, HTTP requests, or status codes.
+- **REST conventions:** Proper HTTP methods (GET/POST/PATCH/DELETE), plural nouns in URLs (`/users`), IDs in the path (not body), standard status codes (201 for create, 204 for delete).
+- **No `**kwargs`:** All service function parameters are explicit — visible to IDE autocomplete, caught by type checkers, debuggable.
 
 **Tech Stack:** Python 3.11+, FastAPI, SQLAlchemy 2.0 (async), Alembic, PostgreSQL 15+, Redis, PyJWT, bcrypt, cryptography (AES-256), httpx, email-validator, pytest, pytest-asyncio
 
@@ -14,6 +45,7 @@
 - **Brute force protection:** Track `failed_login_attempts` and `lockout_until` on the User model. Enforce in login flow.
 - **API key cache:** Implement in-memory TTL cache (5s) in the auth dependency to avoid DB lookups on every request.
 - **`budget_id` FK:** All entity tables (org, team, user, api_key) must declare `budget_id` with `ForeignKey("budgets.id")`.
+- **Transaction safety:** Use `flush()` (not `commit()`) when you need generated IDs mid-transaction. Single `commit()` at the end keeps operations atomic.
 
 **Spec:** `docs/specs/2026-03-22-auth-system-design.md`
 
@@ -34,6 +66,8 @@ makoto_lite_llm/
 │       ├── main.py                      # FastAPI app, lifespan, router includes
 │       ├── config.py                    # Pydantic Settings
 │       ├── database.py                  # async engine, session factory
+│       │
+│       │   # ── MODEL LAYER (database / ORM) ──
 │       ├── models/
 │       │   ├── __init__.py              # re-exports all models
 │       │   ├── base.py                  # DeclarativeBase + UUID/timestamp mixins
@@ -50,53 +84,75 @@ makoto_lite_llm/
 │       │   ├── password_reset_token.py
 │       │   ├── audit.py               # AuditLog + DeletedUser + DeletedTeam + DeletedKey + ErrorLog
 │       │   └── spend.py               # SpendLog + DailyUserSpend + 5 other daily tables
+│       │
+│       │   # ── AUTH PRIMITIVES ──
 │       ├── auth/
 │       │   ├── __init__.py
 │       │   ├── password.py             # bcrypt hash/verify
 │       │   ├── jwt_handler.py          # create/verify access+refresh tokens
 │       │   ├── api_key_auth.py         # generate, hash, verify API keys
 │       │   ├── crypto.py               # AES-256 encrypt/decrypt
-│       │   ├── dependencies.py         # get_current_user, require_role, etc.
+│       │   ├── dependencies.py         # get_current_user, require_role (FastAPI deps)
 │       │   └── middleware.py           # AuthMiddleware pipeline
+│       │
+│       │   # ── SERVICE LAYER (business logic, HTTP-agnostic) ──
 │       ├── services/
 │       │   ├── __init__.py
+│       │   ├── auth_service.py         # login, refresh, logout, password reset
 │       │   ├── user_service.py
 │       │   ├── team_service.py
 │       │   ├── org_service.py
 │       │   ├── key_service.py
 │       │   ├── budget_service.py
-│       │   ├── auth_service.py         # login, refresh, logout, password reset
 │       │   ├── sso_service.py
 │       │   ├── audit_service.py
 │       │   ├── spend_service.py
 │       │   ├── rate_limiter.py         # Redis sliding window
 │       │   └── permission_service.py   # object permissions + access groups
+│       │
+│       │   # ── ROUTE LAYER (HTTP border — wire_in ➜ service ➜ wire_out) ──
 │       ├── routes/
 │       │   ├── __init__.py
-│       │   ├── auth_routes.py          # /auth/*
-│       │   ├── user_routes.py          # /user/*
-│       │   ├── team_routes.py          # /team/*
-│       │   ├── org_routes.py           # /organization/*
-│       │   ├── key_routes.py           # /key/*
-│       │   ├── budget_routes.py        # /budget/*
+│       │   ├── auth_routes.py          # POST /auth/login, /auth/refresh, /auth/logout
+│       │   ├── user_routes.py          # GET/POST/PATCH/DELETE /users/*
+│       │   ├── team_routes.py          # GET/POST/PATCH/DELETE /teams/*
+│       │   ├── org_routes.py           # GET/POST/PATCH/DELETE /organizations/*
+│       │   ├── key_routes.py           # GET/POST/PATCH/DELETE /keys/*
+│       │   ├── budget_routes.py        # GET/POST/PATCH/DELETE /budgets/*
 │       │   └── sso_routes.py           # /sso/*
+│       │
+│       │   # ── SCHEMA LAYER (wire protocol — separated by direction) ──
 │       └── schemas/
 │           ├── __init__.py
-│           ├── common.py               # Pagination, ErrorResponse, enums
-│           ├── auth.py                 # LoginRequest, TokenResponse, etc.
-│           ├── user.py
-│           ├── team.py
-│           ├── org.py
-│           ├── key.py
-│           ├── budget.py
-│           └── sso.py
+│           ├── common.py               # Enums, ErrorResponse, PaginatedResponse
+│           │
+│           ├── wire_in/                # What the CLIENT SENDS us (request validation)
+│           │   ├── __init__.py
+│           │   ├── auth.py             # LoginRequest, RefreshRequest, ResetPasswordRequest
+│           │   ├── user.py             # UserCreate, UserUpdateProfile, UserUpdateBudget
+│           │   ├── team.py             # TeamCreate, TeamUpdate, TeamMemberAdd
+│           │   ├── org.py              # OrgCreate, OrgUpdate, OrgMemberAdd
+│           │   └── key.py             # KeyGenerate, KeyUpdate, KeyRotateRequest
+│           │
+│           └── wire_out/               # What WE SEND BACK (response serialization)
+│               ├── __init__.py
+│               ├── common.py           # StatusResponse, HealthResponse, LogoutAllResponse
+│               ├── auth.py             # TokenResponse
+│               ├── user.py             # UserResponse
+│               ├── team.py             # TeamResponse
+│               ├── org.py              # OrgResponse
+│               └── key.py             # KeyResponse, KeyGenerateResponse
+│
 ├── tests/
-│   ├── conftest.py                     # async test DB, client, fixtures
+│   ├── conftest.py                     # testcontainers PostgreSQL, savepoint isolation
 │   ├── test_auth/
 │   │   ├── test_password.py
 │   │   ├── test_jwt_handler.py
 │   │   ├── test_api_key_auth.py
 │   │   └── test_crypto.py
+│   ├── test_models/
+│   │   ├── test_core_models.py
+│   │   └── test_auth_models.py
 │   ├── test_services/
 │   │   ├── test_user_service.py
 │   │   ├── test_team_service.py
@@ -117,6 +173,45 @@ makoto_lite_llm/
 └── docs/
     ├── specs/
     └── plans/
+```
+
+### Route conventions (REST)
+
+| Action | Method | URL pattern | Status | wire_in | wire_out |
+|--------|--------|-------------|--------|---------|----------|
+| Create | POST | `/resources` | 201 | `ResourceCreate` | `ResourceResponse` |
+| List | GET | `/resources` | 200 | query params | `list[ResourceResponse]` |
+| Get one | GET | `/resources/{id}` | 200 | — | `ResourceResponse` |
+| Update | PATCH | `/resources/{id}` or `/resources/{id}/aspect` | 200 | `ResourceUpdate*` | `ResourceResponse` |
+| Delete | DELETE | `/resources/{id}` | 204 | — | — |
+| Actions | POST | `/auth/login`, `/auth/logout` | 200 | action-specific | action-specific |
+
+### Route implementation pattern
+
+Every route follows this template — no exceptions:
+
+```python
+from app.schemas.wire_in.user import UserCreate        # what comes IN
+from app.schemas.wire_out.user import UserResponse      # what goes OUT
+
+@router.post("", status_code=201)
+async def create(body: UserCreate, ...) -> UserResponse:
+    user = await create_user(db, ...)                   # service returns ORM model
+    return UserResponse.model_validate(user)            # explicit conversion at the border
+```
+
+### Service implementation pattern
+
+Services receive explicit parameters, return ORM models, and know nothing about HTTP:
+
+```python
+async def update_user_profile(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    name: str | None = None,      # every parameter explicit — no **kwargs
+    role: str | None = None,
+    metadata_json: dict | None = None,
+) -> User | None:                 # returns ORM model, not schema
 ```
 
 ---

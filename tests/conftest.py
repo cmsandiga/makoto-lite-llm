@@ -3,6 +3,7 @@ import os
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
@@ -12,8 +13,13 @@ from app.database import get_db
 from app.main import app
 from app.models import Base
 
-# Required for testcontainers with Colima
-os.environ.setdefault("DOCKER_HOST", "unix:///Users/makoto.sandiga/.colima/default/docker.sock")
+# Required for testcontainers with Colima (macOS only)
+import sys
+
+if sys.platform == "darwin":
+    os.environ.setdefault(
+        "DOCKER_HOST", "unix:///Users/makoto.sandiga/.colima/default/docker.sock"
+    )
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 
@@ -51,9 +57,23 @@ def db_engine(postgres_container) -> AsyncEngine:
 
 @pytest.fixture
 async def db_session(db_engine: AsyncEngine):
-    async with AsyncSession(db_engine, expire_on_commit=False) as session:
+    # Open a real connection and start a transaction we will ALWAYS roll back.
+    # Inside the test, session.commit() hits a SAVEPOINT (nested transaction),
+    # so the data is visible within the test but never persists to the DB.
+    async with db_engine.connect() as conn:
+        txn = await conn.begin()
+        session = AsyncSession(bind=conn, expire_on_commit=False)
+
+        # Make session.commit() create/release SAVEPOINTs instead of real commits
+        @event.listens_for(session.sync_session, "after_transaction_end")
+        def restart_savepoint(session_sync, transaction):
+            if transaction.nested and not transaction._parent.nested:
+                session_sync.begin_nested()
+
+        await session.begin_nested()  # first SAVEPOINT
         yield session
-        await session.rollback()
+        await session.close()
+        await txn.rollback()
 
 
 @pytest.fixture

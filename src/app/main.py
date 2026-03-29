@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.config import settings
+from app.routes.auth_routes import router as auth_router
+from app.routes.user_routes import router as user_router
+from app.schemas.wire_out.common import HealthResponse
 
 
 @asynccontextmanager
@@ -21,6 +24,10 @@ app = FastAPI(
 )
 
 
+app.include_router(auth_router)
+app.include_router(user_router)
+
+
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> HealthResponse:
+    return HealthResponse()
