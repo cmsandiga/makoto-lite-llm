@@ -1,10 +1,10 @@
-import uuid
+from uuid_extensions import uuid7
 
 from app.auth.jwt_handler import create_access_token, create_refresh_token, decode_token
 
 
 def test_create_and_decode_access_token():
-    user_id = uuid.uuid4()
+    user_id = uuid7()
     token = create_access_token(
         user_id=user_id, role="proxy_admin", org_id=None, team_id=None
     )
@@ -15,7 +15,7 @@ def test_create_and_decode_access_token():
 
 
 def test_create_and_decode_refresh_token():
-    user_id = uuid.uuid4()
+    user_id = uuid7()
     token = create_refresh_token(user_id=user_id)
     payload = decode_token(token)
     assert payload["sub"] == str(user_id)

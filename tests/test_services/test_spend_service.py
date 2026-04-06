@@ -1,7 +1,6 @@
 # tests/test_services/test_spend_service.py
-import uuid
-
 import pytest
+from uuid_extensions import uuid7
 from sqlalchemy import select
 
 from app.models.spend import DailyKeySpend, DailyUserSpend, SpendLog
@@ -14,7 +13,7 @@ async def test_log_spend_creates_spend_log(db_session):
         db=db_session,
         request_id="req-001",
         api_key_hash="abc123",
-        user_id=uuid.uuid4(),
+        user_id=uuid7(),
         model="gpt-4",
         provider="openai",
         input_tokens=100,
@@ -35,7 +34,7 @@ async def test_log_spend_creates_spend_log(db_session):
 
 async def test_log_spend_upserts_daily_user(db_session):
     """log_spend upserts the daily_user_spend aggregate."""
-    user_id = uuid.uuid4()
+    user_id = uuid7()
     await log_spend(
         db=db_session,
         request_id="req-002",
