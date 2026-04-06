@@ -12,7 +12,9 @@ from app.auth.jwt_handler import decode_token
 from app.config import settings
 from app.database import get_db
 from app.models.api_key import ApiKey
+from app.models.team import Team
 from app.models.user import User
+from app.services.permission_service import resolve_model_access
 
 # In-memory TTL cache for API key auth (spec section 2.1: 5s TTL).
 # Key: api_key_hash -> (ApiKey, User) tuple.
@@ -104,6 +106,56 @@ def require_role(*roles: str) -> Callable:
     async def dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+
+    return dependency
+
+
+def require_model_access(path_param: str = "model") -> Callable:
+    """Factory returning a dependency that checks model access for the current auth.
+
+    Reads the model name from the path parameter specified by `path_param`.
+    proxy_admin users bypass the check. JWT users without an API key have no restrictions.
+    """
+
+    async def dependency(
+        request: Request,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        model_name = request.path_params.get(path_param)
+        if model_name is None:
+            return user
+
+        # proxy_admin bypasses model access checks
+        if user.role == "proxy_admin":
+            return user
+
+        # Get the auth token to look up the API key
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.split(" ", 1)[1] if " " in auth_header else ""
+
+        # JWT users without an API key — no model restrictions
+        if not token.startswith("sk-"):
+            return user
+
+        api_key = await _lookup_api_key(db, hash_api_key(token))
+
+        key_models = api_key.allowed_models if api_key else None
+        team_models = None
+
+        if api_key and api_key.team_id:
+            team_result = await db.execute(select(Team).where(Team.id == api_key.team_id))
+            team = team_result.scalar_one_or_none()
+            if team:
+                team_models = team.allowed_models
+
+        if not resolve_model_access(model_name, key_models, team_models):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Model '{model_name}' is not allowed for this key",
+            )
+
         return user
 
     return dependency
