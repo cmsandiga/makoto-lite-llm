@@ -1,11 +1,11 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
 from app.database import get_db
+from app.exceptions import DuplicateError
 from app.models.user import User
 from app.schemas.wire_in.user import (
     UserBlockRequest,
@@ -46,8 +46,8 @@ async def create(
             max_budget=body.max_budget,
             metadata=body.metadata,
         )
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail="Email already exists")
+    except DuplicateError as e:
+        raise HTTPException(status_code=409, detail=e.detail)
     return UserResponse.model_validate(user)
 
 
