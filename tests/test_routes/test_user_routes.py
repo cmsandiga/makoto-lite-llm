@@ -80,10 +80,10 @@ async def test_get_user_not_found(client, db_session):
     db_session.add(admin)
     await db_session.commit()
 
-    import uuid
+    from uuid_extensions import uuid7
 
     response = await client.get(
-        f"/users/{uuid.uuid4()}", headers=_admin_headers(admin.id)
+        f"/users/{uuid7()}", headers=_admin_headers(admin.id)
     )
     assert response.status_code == 404
 

@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from uuid_extensions import uuid7
 
 from app.config import settings
 
@@ -29,7 +30,7 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
     payload = {
         "sub": str(user_id),
         "type": "refresh",
-        "jti": str(uuid.uuid4()),
+        "jti": str(uuid7()),
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc)
         + timedelta(days=settings.refresh_token_expire_days),

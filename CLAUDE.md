@@ -214,6 +214,7 @@ await db.commit()
 
 ## Critical Implementation Rules
 
+- **UUIDs:** Use UUIDv7 everywhere (`from uuid_extensions import uuid7`), never `uuid.uuid4()`. UUIDv7 is time-sortable, which gives better index locality in PostgreSQL. The `UUIDMixin` in `models/base.py` already defaults to `uuid7`. Tests must also use `uuid7()` for consistency.
 - **SQLAlchemy types:** Use `sqlalchemy.types.Uuid` and `sqlalchemy.JSON` (not `PgUUID`/`JSONB`) so models work with both PostgreSQL (prod) and SQLite (tests).
 - **Cascade deletion:** Implement in the service layer explicitly — not via SQLAlchemy cascade — so deletions can be recorded in `audit`/`deleted_*` tables before removal.
 - **API key cache:** In-memory TTL cache (5s) in the auth dependency to avoid DB hits on every request.

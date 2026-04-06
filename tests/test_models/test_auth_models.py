@@ -1,5 +1,6 @@
-import uuid
 from datetime import datetime, timedelta, timezone
+
+from uuid_extensions import uuid7
 
 from sqlalchemy import select
 
@@ -53,11 +54,11 @@ async def test_create_refresh_token(db_session):
 
 async def test_create_audit_log(db_session):
     log = AuditLog(
-        actor_id=uuid.uuid4(),
+        actor_id=uuid7(),
         actor_type="user",
         action="create",
         resource_type="team",
-        resource_id=str(uuid.uuid4()),
+        resource_id=str(uuid7()),
         ip_address="127.0.0.1",
         user_agent="test",
     )

@@ -1,7 +1,6 @@
 # tests/test_services/test_audit_service.py
-import uuid
-
 from sqlalchemy import select
+from uuid_extensions import uuid7
 
 from app.models.audit import AuditLog, DeletedKey, DeletedTeam, DeletedUser
 from app.services.audit_service import log_action, log_deletion
@@ -9,14 +8,14 @@ from app.services.audit_service import log_action, log_deletion
 
 async def test_log_action(db_session):
     """log_action creates an AuditLog row."""
-    actor_id = uuid.uuid4()
+    actor_id = uuid7()
     await log_action(
         db=db_session,
         actor_id=actor_id,
         actor_type="user",
         action="create",
         resource_type="team",
-        resource_id=str(uuid.uuid4()),
+        resource_id=str(uuid7()),
         ip_address="127.0.0.1",
         user_agent="test-agent",
     )
@@ -32,7 +31,7 @@ async def test_log_action(db_session):
 
 async def test_log_action_with_snapshots(db_session):
     """log_action can record before/after values."""
-    actor_id = uuid.uuid4()
+    actor_id = uuid7()
     await log_action(
         db=db_session,
         actor_id=actor_id,
@@ -56,8 +55,8 @@ async def test_log_action_with_snapshots(db_session):
 
 async def test_log_deletion_user(db_session):
     """log_deletion records a deleted user."""
-    original_id = uuid.uuid4()
-    deleted_by = uuid.uuid4()
+    original_id = uuid7()
+    deleted_by = uuid7()
     await log_deletion(
         db=db_session,
         resource_type="user",
@@ -77,8 +76,8 @@ async def test_log_deletion_user(db_session):
 
 async def test_log_deletion_team(db_session):
     """log_deletion records a deleted team."""
-    original_id = uuid.uuid4()
-    deleted_by = uuid.uuid4()
+    original_id = uuid7()
+    deleted_by = uuid7()
     await log_deletion(
         db=db_session,
         resource_type="team",
@@ -97,8 +96,8 @@ async def test_log_deletion_team(db_session):
 
 async def test_log_deletion_key(db_session):
     """log_deletion records a deleted key."""
-    original_id = uuid.uuid4()
-    deleted_by = uuid.uuid4()
+    original_id = uuid7()
+    deleted_by = uuid7()
     await log_deletion(
         db=db_session,
         resource_type="key",
