@@ -190,6 +190,28 @@ async def update_user_profile(
 - Single `commit()` at the end to keep operations atomic
 - Never two `commit()` calls for operations that should be atomic
 
+### Unique constraint violations (concurrency-safe)
+
+Never "check-then-insert" — it has a TOCTOU race condition under concurrent requests. Instead:
+
+```python
+from sqlalchemy.exc import IntegrityError
+from app.exceptions import DuplicateError
+
+db.add(obj)
+try:
+    await db.flush()
+except IntegrityError:
+    await db.rollback()
+    raise DuplicateError("Slug already exists")
+await db.commit()
+```
+
+- Service raises `DuplicateError` (domain exception, `app/exceptions.py`)
+- Route catches `DuplicateError` and maps to HTTP 409
+- PostgreSQL enforces uniqueness atomically — no race conditions
+- `db.rollback()` resets the session after the failed flush
+
 ## Critical Implementation Rules
 
 - **SQLAlchemy types:** Use `sqlalchemy.types.Uuid` and `sqlalchemy.JSON` (not `PgUUID`/`JSONB`) so models work with both PostgreSQL (prod) and SQLite (tests).

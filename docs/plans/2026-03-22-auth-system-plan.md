@@ -45,6 +45,7 @@
 - **Brute force protection:** Track `failed_login_attempts` and `lockout_until` on the User model. Enforce in login flow.
 - **API key cache:** Implement in-memory TTL cache (5s) in the auth dependency to avoid DB lookups on every request.
 - **`budget_id` FK:** All entity tables (org, team, user, api_key) must declare `budget_id` with `ForeignKey("budgets.id")`.
+- **Unique constraint violations (concurrency-safe pattern):** Never use "check-then-insert" for uniqueness — it has a TOCTOU race condition. Instead, attempt the insert via `db.flush()`, catch `IntegrityError`, call `db.rollback()`, and raise `DuplicateError` (a domain exception in `app/exceptions.py`). The route layer catches `DuplicateError` and maps it to HTTP 409. This pattern lets PostgreSQL enforce uniqueness atomically, avoiding concurrency bugs. **Test caveat:** `db.rollback()` invalidates ORM objects created in the same test session, so duplicate-detection tests must be isolated (separate test function) or create all objects via the HTTP API rather than `db_session.add()`.
 - **Transaction safety:** Use `flush()` (not `commit()`) when you need generated IDs mid-transaction. Single `commit()` at the end keeps operations atomic.
 
 **Spec:** `docs/specs/2026-03-22-auth-system-design.md`

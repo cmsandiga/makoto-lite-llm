@@ -1,9 +1,11 @@
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.password import hash_password
+from app.exceptions import DuplicateError
 from app.models.user import User
 
 
@@ -19,6 +21,7 @@ async def create_user(
     max_budget: float | None = None,
     metadata: dict | None = None,
 ) -> User:
+    """Create a user. Raises DuplicateError if email already exists."""
     user = User(
         email=email,
         password_hash=hash_password(password) if password else None,
@@ -28,6 +31,11 @@ async def create_user(
         metadata_json=metadata,
     )
     db.add(user)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise DuplicateError("Email already exists")
     await db.commit()
     await db.refresh(user)
     return user
