@@ -37,11 +37,12 @@ def resolve_model_access(
     model: str,
     key_allowed_models: list[str] | None,
     team_allowed_models: list[str] | None,
+    org_allowed_models: list[str] | None = None,
 ) -> bool:
     """Resolve whether a model is accessible through the inheritance chain.
 
-    Resolution order: key → team → allow-all.
-    If both key and team return None (i.e. allowed_models is None),
+    Resolution order: key → team → org → allow-all.
+    If all levels return None (i.e. allowed_models is None),
     the model is allowed by default.
     """
     key_result = model_is_allowed(model, key_allowed_models)
@@ -51,5 +52,9 @@ def resolve_model_access(
     team_result = model_is_allowed(model, team_allowed_models)
     if team_result is not None:
         return team_result
+
+    org_result = model_is_allowed(model, org_allowed_models)
+    if org_result is not None:
+        return org_result
 
     return True

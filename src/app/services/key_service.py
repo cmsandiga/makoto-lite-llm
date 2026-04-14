@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.api_key_auth import generate_api_key, get_key_prefix, hash_api_key
+from app.auth.dependencies import invalidate_api_key_cache
 from app.models.api_key import ApiKey
 
 
@@ -125,6 +126,9 @@ async def rotate_key(
     if key is None:
         return None
 
+    # Invalidate cache for the old key hash before rotation
+    invalidate_api_key_cache(key.api_key_hash)
+
     # Store current hash as previous
     key.previous_key_hash = key.api_key_hash
     key.grace_period_expires_at = datetime.now(timezone.utc) + timedelta(hours=grace_period_hours)
@@ -150,6 +154,7 @@ async def block_key(db: AsyncSession, key_id: uuid.UUID, blocked: bool) -> ApiKe
     key.is_blocked = blocked
     await db.commit()
     await db.refresh(key)
+    invalidate_api_key_cache(key.api_key_hash)
     return key
 
 

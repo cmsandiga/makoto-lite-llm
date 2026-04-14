@@ -43,6 +43,12 @@ class Organization(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
+    # ========== Model Access ==========
+    allowed_models: Mapped[list | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
     # ========== Status ==========
     is_blocked: Mapped[bool] = mapped_column(
         Boolean,
