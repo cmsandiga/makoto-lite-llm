@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
     base_url: str = "http://localhost:8000"
+    sso_dashboard_redirect_url: str = "http://localhost:3000/auth/callback"
 
 
 settings = Settings()
