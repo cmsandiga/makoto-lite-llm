@@ -9,8 +9,9 @@ from app.services.sso_service import (
     build_authorize_url,
     create_sso_config,
     delete_sso_config,
+    generate_pkce_pair,
     get_sso_config,
-    validate_state,
+    validate_and_consume_state,
 )
 
 
@@ -132,6 +133,8 @@ async def test_build_authorize_url(db_session):
     assert "scope=openid+email+profile" in url or "scope=openid%20email%20profile" in url
     assert f"state={state}" in url
     assert len(state) > 16
+    assert "code_challenge=" in url
+    assert "code_challenge_method=S256" in url
 
 
 async def test_build_authorize_url_org_not_found(db_session):
@@ -143,13 +146,24 @@ async def test_build_authorize_url_org_not_found(db_session):
     assert result is None
 
 
+def test_generate_pkce_pair():
+    verifier, challenge = generate_pkce_pair()
+    assert 43 <= len(verifier) <= 128
+    assert len(challenge) > 0
+    assert "=" not in challenge  # no padding
+    v2, c2 = generate_pkce_pair()
+    assert verifier != v2
+
+
 async def test_validate_state_valid():
-    # Manually insert a state into the store
-    _state_store["test-state-123"] = True
-    assert validate_state("test-state-123") is True
+    test_org_id = uuid7()
+    _state_store["test-state-123"] = {"verifier": "test-verifier-abc", "org_id": test_org_id}
+    result = validate_and_consume_state("test-state-123")
+    assert result["verifier"] == "test-verifier-abc"
+    assert result["org_id"] == test_org_id
     # Second call should fail — state is consumed
-    assert validate_state("test-state-123") is False
+    assert validate_and_consume_state("test-state-123") is None
 
 
 async def test_validate_state_invalid():
-    assert validate_state("nonexistent-state") is False
+    assert validate_and_consume_state("nonexistent-state") is None

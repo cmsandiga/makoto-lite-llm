@@ -16,7 +16,7 @@ from app.services.sso_service import (
     create_sso_config,
     delete_sso_config,
     get_sso_config,
-    validate_state,
+    validate_and_consume_state,
 )
 
 router = APIRouter(prefix="/sso", tags=["sso"])
@@ -107,6 +107,6 @@ async def callback(
     code: str = Query(...),
     state: str = Query(...),
 ) -> None:
-    if not validate_state(state):
+    if not validate_and_consume_state(state):
         raise HTTPException(status_code=400, detail="Invalid or expired state parameter")
     raise HTTPException(status_code=501, detail="OIDC token exchange not yet implemented")

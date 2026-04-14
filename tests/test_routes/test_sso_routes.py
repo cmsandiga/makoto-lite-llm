@@ -206,7 +206,7 @@ async def test_authorize_org_not_found(client, db_session):
 
 async def test_callback_valid_state(client, db_session):
     # Manually add a state to simulate an authorize flow
-    _state_store["valid-test-state"] = True
+    _state_store["valid-test-state"] = {"verifier": "v", "org_id": uuid7()}
     response = await client.get("/sso/callback?code=authcode123&state=valid-test-state")
     assert response.status_code == 501
     assert "not yet implemented" in response.json()["detail"].lower()

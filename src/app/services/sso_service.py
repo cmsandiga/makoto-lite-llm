@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import secrets
 import uuid
 from urllib.parse import urlencode
@@ -12,8 +14,16 @@ from app.exceptions import DuplicateError
 from app.models.sso_config import SSOConfig
 
 # In-memory state store with 10-minute TTL for CSRF protection.
-# Key: state token, Value: True (just needs to exist).
+# Key: state token, Value: {"verifier": str, "org_id": UUID}.
 _state_store: TTLCache = TTLCache(maxsize=1024, ttl=600)
+
+
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE code_verifier and code_challenge (S256)."""
+    verifier = secrets.token_urlsafe(64)  # 86 chars
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return verifier, challenge
 
 
 async def create_sso_config(
@@ -81,13 +91,15 @@ async def build_authorize_url(
     """Build the OAuth2 authorize redirect URL for an org's SSO config.
 
     Returns (url, state) or None if no config found.
+    Stores code_verifier + org_id in state store for callback.
     """
     config = await get_sso_config(db, org_id)
     if config is None:
         return None
 
     state = secrets.token_urlsafe(32)
-    _state_store[state] = True
+    verifier, challenge = generate_pkce_pair()
+    _state_store[state] = {"verifier": verifier, "org_id": org_id}
 
     params = urlencode({
         "client_id": config.client_id,
@@ -95,11 +107,16 @@ async def build_authorize_url(
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
     })
     url = f"{config.issuer_url}/authorize?{params}"
     return url, state
 
 
-def validate_state(state: str) -> bool:
-    """Validate and consume an OAuth2 state token. Returns True if valid."""
-    return _state_store.pop(state, None) is not None
+def validate_and_consume_state(state: str) -> dict | None:
+    """Validate and consume an OAuth2 state token.
+
+    Returns {"verifier": str, "org_id": UUID} if valid, None if invalid/expired.
+    """
+    return _state_store.pop(state, None)
