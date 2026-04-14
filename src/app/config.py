@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     app_name: str = "Makoto LiteLLM"
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
+    base_url: str = "http://localhost:8000"
 
 
 settings = Settings()
