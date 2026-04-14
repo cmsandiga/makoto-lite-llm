@@ -171,3 +171,28 @@ async def provision_sso_user(
     return user
 
 
+async def map_groups_to_teams(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    idp_groups: list[str] | None,
+    group_to_team_mapping: dict | None,
+) -> None:
+    """Map IdP groups to team memberships using the SSO config's mapping."""
+    if not group_to_team_mapping or not idp_groups:
+        return
+
+    for group_name in idp_groups:
+        team_id_str = group_to_team_mapping.get(group_name)
+        if team_id_str is None:
+            continue
+        team_id = uuid.UUID(team_id_str)
+        membership = TeamMembership(user_id=user_id, team_id=team_id, role="member")
+        db.add(membership)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+
+    await db.commit()
+
+

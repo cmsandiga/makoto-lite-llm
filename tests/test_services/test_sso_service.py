@@ -12,6 +12,7 @@ from app.services.sso_service import (
     delete_sso_config,
     generate_pkce_pair,
     get_sso_config,
+    map_groups_to_teams,
     provision_sso_user,
     validate_and_consume_state,
 )
@@ -247,3 +248,52 @@ async def test_provision_sso_user_creates_org_membership(db_session):
     assert membership.role == "member"
 
 
+# ---------------------------------------------------------------------------
+# Task 7: map_groups_to_teams
+# ---------------------------------------------------------------------------
+
+
+async def test_map_groups_to_teams(db_session):
+    from sqlalchemy import select as sa_select
+
+    from app.models.membership import TeamMembership
+    from app.models.team import Team
+
+    org = await _create_org(db_session)
+
+    eng_team = Team(name=f"Engineering-{uuid7()}", org_id=org.id)
+    platform_team = Team(name=f"Platform-{uuid7()}", org_id=org.id)
+    db_session.add_all([eng_team, platform_team])
+    await db_session.commit()
+    await db_session.refresh(eng_team)
+    await db_session.refresh(platform_team)
+
+    user = User(email=f"mapper-{uuid7()}@acme.com", role="member")
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    mapping = {
+        "Engineering": str(eng_team.id),
+        "Platform": str(platform_team.id),
+    }
+    idp_groups = ["Engineering", "Platform", "Unknown-Group"]
+
+    await map_groups_to_teams(db_session, user.id, idp_groups, mapping)
+
+    result = await db_session.execute(
+        sa_select(TeamMembership).where(TeamMembership.user_id == user.id)
+    )
+    memberships = list(result.scalars().all())
+    team_ids = {m.team_id for m in memberships}
+    assert eng_team.id in team_ids
+    assert platform_team.id in team_ids
+    assert len(memberships) == 2
+
+
+async def test_map_groups_to_teams_no_mapping(db_session):
+    user = User(email=f"no-map-{uuid7()}@acme.com", role="member")
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    await map_groups_to_teams(db_session, user.id, ["Engineering"], None)
