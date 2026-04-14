@@ -12,6 +12,7 @@ from app.auth.jwt_handler import decode_token
 from app.config import settings
 from app.database import get_db
 from app.models.api_key import ApiKey
+from app.models.organization import Organization
 from app.models.team import Team
 from app.models.user import User
 from app.services.permission_service import resolve_model_access
@@ -143,6 +144,7 @@ def require_model_access(path_param: str = "model") -> Callable:
 
         key_models = api_key.allowed_models if api_key else None
         team_models = None
+        org_models = None
 
         if api_key and api_key.team_id:
             team_result = await db.execute(select(Team).where(Team.id == api_key.team_id))
@@ -150,7 +152,15 @@ def require_model_access(path_param: str = "model") -> Callable:
             if team:
                 team_models = team.allowed_models
 
-        if not resolve_model_access(model_name, key_models, team_models):
+        if api_key and api_key.org_id:
+            org_result = await db.execute(
+                select(Organization).where(Organization.id == api_key.org_id)
+            )
+            org = org_result.scalar_one_or_none()
+            if org:
+                org_models = org.allowed_models
+
+        if not resolve_model_access(model_name, key_models, team_models, org_models):
             raise HTTPException(
                 status_code=403,
                 detail=f"Model '{model_name}' is not allowed for this key",

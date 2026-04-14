@@ -102,3 +102,55 @@ def test_resolve_empty_key_list_denies():
         )
         is False
     )
+
+
+# --- Org-level model access ---
+
+
+def test_resolve_inherits_to_org():
+    assert (
+        resolve_model_access(
+            "gpt-4",
+            key_allowed_models=None,
+            team_allowed_models=None,
+            org_allowed_models=["gpt-4"],
+        )
+        is True
+    )
+
+
+def test_resolve_org_denies():
+    assert (
+        resolve_model_access(
+            "llama-70b",
+            key_allowed_models=None,
+            team_allowed_models=None,
+            org_allowed_models=["gpt-4"],
+        )
+        is False
+    )
+
+
+def test_resolve_team_takes_precedence_over_org():
+    # Team allows gpt-4, org denies it — team wins (checked first)
+    assert (
+        resolve_model_access(
+            "gpt-4",
+            key_allowed_models=None,
+            team_allowed_models=["gpt-4"],
+            org_allowed_models=[],
+        )
+        is True
+    )
+
+
+def test_resolve_all_none_allows():
+    assert (
+        resolve_model_access(
+            "anything",
+            key_allowed_models=None,
+            team_allowed_models=None,
+            org_allowed_models=None,
+        )
+        is True
+    )
