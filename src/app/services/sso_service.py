@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.crypto import encrypt
 from app.exceptions import DuplicateError
+from app.models.membership import OrgMembership, TeamMembership
 from app.models.sso_config import SSOConfig
+from app.models.user import User
 
 # In-memory state store with 10-minute TTL for CSRF protection.
 # Key: state token, Value: {"verifier": str, "org_id": UUID}.
@@ -120,3 +122,52 @@ def validate_and_consume_state(state: str) -> dict | None:
     Returns {"verifier": str, "org_id": UUID} if valid, None if invalid/expired.
     """
     return _state_store.pop(state, None)
+
+
+async def provision_sso_user(
+    db: AsyncSession,
+    email: str,
+    name: str | None,
+    sso_provider: str,
+    sso_subject: str,
+    org_id: uuid.UUID,
+    default_role: str = "member",
+) -> User:
+    """Find or create a user from SSO claims, and ensure org membership."""
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        user = User(
+            email=email,
+            name=name,
+            role=default_role,
+            sso_provider=sso_provider,
+            sso_subject=sso_subject,
+        )
+        db.add(user)
+        await db.flush()
+    else:
+        user.sso_provider = sso_provider
+        user.sso_subject = sso_subject
+        if name and not user.name:
+            user.name = name
+
+    membership = OrgMembership(
+        user_id=user.id,
+        org_id=org_id,
+        role=default_role,
+    )
+    db.add(membership)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one()
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+

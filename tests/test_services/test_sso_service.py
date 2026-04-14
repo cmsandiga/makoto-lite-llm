@@ -4,6 +4,7 @@ from uuid_extensions import uuid7
 from app.auth.crypto import decrypt
 from app.exceptions import DuplicateError
 from app.models.organization import Organization
+from app.models.user import User
 from app.services.sso_service import (
     _state_store,
     build_authorize_url,
@@ -11,6 +12,7 @@ from app.services.sso_service import (
     delete_sso_config,
     generate_pkce_pair,
     get_sso_config,
+    provision_sso_user,
     validate_and_consume_state,
 )
 
@@ -167,3 +169,81 @@ async def test_validate_state_valid():
 
 async def test_validate_state_invalid():
     assert validate_and_consume_state("nonexistent-state") is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6: provision_sso_user
+# ---------------------------------------------------------------------------
+
+
+async def test_provision_sso_user_creates_new(db_session):
+    org = await _create_org(db_session)
+    user = await provision_sso_user(
+        db_session,
+        email="new@acme.com",
+        name="New User",
+        sso_provider="google",
+        sso_subject="google-sub-123",
+        org_id=org.id,
+        default_role="member",
+    )
+    assert user.email == "new@acme.com"
+    assert user.name == "New User"
+    assert user.sso_provider == "google"
+    assert user.sso_subject == "google-sub-123"
+    assert user.role == "member"
+    assert user.password_hash is None
+
+
+async def test_provision_sso_user_links_existing(db_session):
+    org = await _create_org(db_session)
+    existing = User(
+        email="existing@acme.com",
+        password_hash="some-hash",
+        role="member",
+    )
+    db_session.add(existing)
+    await db_session.commit()
+    await db_session.refresh(existing)
+
+    user = await provision_sso_user(
+        db_session,
+        email="existing@acme.com",
+        name="Existing User",
+        sso_provider="google",
+        sso_subject="google-sub-456",
+        org_id=org.id,
+        default_role="member",
+    )
+    assert user.id == existing.id
+    assert user.sso_provider == "google"
+    assert user.sso_subject == "google-sub-456"
+    assert user.password_hash == "some-hash"
+
+
+async def test_provision_sso_user_creates_org_membership(db_session):
+    from sqlalchemy import select as sa_select
+
+    from app.models.membership import OrgMembership
+
+    org = await _create_org(db_session)
+    user = await provision_sso_user(
+        db_session,
+        email="member@acme.com",
+        name="Member",
+        sso_provider="okta",
+        sso_subject="okta-sub-789",
+        org_id=org.id,
+        default_role="member",
+    )
+    result = await db_session.execute(
+        sa_select(OrgMembership).where(
+            OrgMembership.user_id == user.id,
+            OrgMembership.org_id == org.id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    assert membership is not None
+    assert membership.role == "member"
+
+
