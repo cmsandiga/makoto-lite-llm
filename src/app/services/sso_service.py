@@ -1,5 +1,8 @@
+import secrets
 import uuid
+from urllib.parse import urlencode
 
+from cachetools import TTLCache
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.crypto import encrypt
 from app.exceptions import DuplicateError
 from app.models.sso_config import SSOConfig
+
+# In-memory state store with 10-minute TTL for CSRF protection.
+# Key: state token, Value: True (just needs to exist).
+_state_store: TTLCache = TTLCache(maxsize=1024, ttl=600)
 
 
 async def create_sso_config(
@@ -62,3 +69,35 @@ async def delete_sso_config(db: AsyncSession, org_id: uuid.UUID) -> bool:
     )
     await db.commit()
     return result.rowcount > 0
+
+
+async def build_authorize_url(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    callback_url: str,
+) -> tuple[str, str] | None:
+    """Build the OAuth2 authorize redirect URL for an org's SSO config.
+
+    Returns (url, state) or None if no config found.
+    """
+    config = await get_sso_config(db, org_id)
+    if config is None:
+        return None
+
+    state = secrets.token_urlsafe(32)
+    _state_store[state] = True
+
+    params = urlencode({
+        "client_id": config.client_id,
+        "redirect_uri": callback_url,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+    })
+    url = f"{config.issuer_url}/authorize?{params}"
+    return url, state
+
+
+def validate_state(state: str) -> bool:
+    """Validate and consume an OAuth2 state token. Returns True if valid."""
+    return _state_store.pop(state, None) is not None

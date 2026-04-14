@@ -4,7 +4,14 @@ from uuid_extensions import uuid7
 from app.auth.crypto import decrypt
 from app.exceptions import DuplicateError
 from app.models.organization import Organization
-from app.services.sso_service import create_sso_config, delete_sso_config, get_sso_config
+from app.services.sso_service import (
+    build_authorize_url,
+    create_sso_config,
+    delete_sso_config,
+    get_sso_config,
+    validate_state,
+    _state_store,
+)
 
 
 async def _create_org(db_session) -> Organization:
@@ -101,3 +108,48 @@ async def test_delete_sso_config(db_session):
 async def test_delete_sso_config_not_found(db_session):
     result = await delete_sso_config(db_session, uuid7())
     assert result is False
+
+
+async def test_build_authorize_url(db_session):
+    org = await _create_org(db_session)
+    await create_sso_config(
+        db_session,
+        org_id=org.id,
+        provider="google",
+        client_id="goog-123",
+        client_secret="secret",
+        issuer_url="https://accounts.google.com",
+    )
+    url, state = await build_authorize_url(
+        db_session,
+        org_id=org.id,
+        callback_url="http://localhost:8000/sso/callback",
+    )
+    assert "https://accounts.google.com/authorize" in url
+    assert "client_id=goog-123" in url
+    assert "redirect_uri=http" in url
+    assert "response_type=code" in url
+    assert "scope=openid+email+profile" in url or "scope=openid%20email%20profile" in url
+    assert f"state={state}" in url
+    assert len(state) > 16
+
+
+async def test_build_authorize_url_org_not_found(db_session):
+    result = await build_authorize_url(
+        db_session,
+        org_id=uuid7(),
+        callback_url="http://localhost:8000/sso/callback",
+    )
+    assert result is None
+
+
+async def test_validate_state_valid():
+    # Manually insert a state into the store
+    _state_store["test-state-123"] = True
+    assert validate_state("test-state-123") is True
+    # Second call should fail — state is consumed
+    assert validate_state("test-state-123") is False
+
+
+async def test_validate_state_invalid():
+    assert validate_state("nonexistent-state") is False
