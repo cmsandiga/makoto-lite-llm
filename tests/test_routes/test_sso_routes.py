@@ -1,3 +1,6 @@
+import httpx
+import pytest
+import respx
 from uuid_extensions import uuid7
 
 from app.auth.jwt_handler import create_access_token
@@ -202,10 +205,6 @@ async def test_authorize_org_not_found(client, db_session):
 
 
 # ========== GET /sso/callback ==========
-
-import httpx
-import pytest
-import respx
 
 
 @pytest.fixture
