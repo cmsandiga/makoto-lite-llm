@@ -4,6 +4,7 @@ from app.auth.jwt_handler import create_access_token
 from app.auth.password import hash_password
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.sso_service import _state_store
 
 
 def _admin_headers(user_id):
@@ -18,7 +19,11 @@ def _member_headers(user_id):
 
 async def _setup(db_session):
     """Create an admin user and an org. Returns (admin, org)."""
-    admin = User(email=f"admin-{uuid7()}@test.com", password_hash=hash_password("pass"), role="proxy_admin")
+    admin = User(
+        email=f"admin-{uuid7()}@test.com",
+        password_hash=hash_password("pass"),
+        role="proxy_admin",
+    )
     db_session.add(admin)
     org = Organization(name="SSO Org", slug=f"sso-{uuid7()}")
     db_session.add(org)
@@ -72,7 +77,11 @@ async def test_create_sso_config_duplicate(client, db_session):
 
 
 async def test_create_sso_config_non_admin(client, db_session):
-    member = User(email=f"member-{uuid7()}@test.com", password_hash=hash_password("pass"), role="member")
+    member = User(
+        email=f"member-{uuid7()}@test.com",
+        password_hash=hash_password("pass"),
+        role="member",
+    )
     db_session.add(member)
     await db_session.commit()
     await db_session.refresh(member)
@@ -193,8 +202,6 @@ async def test_authorize_org_not_found(client, db_session):
 
 
 # ========== GET /sso/callback ==========
-
-from app.services.sso_service import _state_store
 
 
 async def test_callback_valid_state(client, db_session):

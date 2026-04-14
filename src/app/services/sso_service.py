@@ -48,7 +48,9 @@ async def create_sso_config(
         await db.flush()
     except IntegrityError:
         await db.rollback()
-        raise DuplicateError("SSO config already exists for this organization")
+        raise DuplicateError(
+            "SSO config already exists for this organization"
+        ) from None
     await db.commit()
     await db.refresh(config)
     return config

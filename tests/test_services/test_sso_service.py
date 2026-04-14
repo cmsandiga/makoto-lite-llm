@@ -5,12 +5,12 @@ from app.auth.crypto import decrypt
 from app.exceptions import DuplicateError
 from app.models.organization import Organization
 from app.services.sso_service import (
+    _state_store,
     build_authorize_url,
     create_sso_config,
     delete_sso_config,
     get_sso_config,
     validate_state,
-    _state_store,
 )
 
 

@@ -22,11 +22,9 @@ from app.services.sso_service import (
 router = APIRouter(prefix="/sso", tags=["sso"])
 
 
-def _mask_response(config) -> SSOConfigResponse:
-    """Convert ORM model to response with client_secret masked."""
-    resp = SSOConfigResponse.model_validate(config)
-    resp.client_secret = "***"
-    return resp
+def _to_response(config) -> SSOConfigResponse:
+    """Convert ORM model to response. Secret masking handled by model_validator."""
+    return SSOConfigResponse.model_validate(config)
 
 
 # ========== POST /sso/config — create ==========
@@ -52,8 +50,8 @@ async def create(
             default_role=body.default_role,
         )
     except DuplicateError as e:
-        raise HTTPException(status_code=409, detail=e.detail)
-    return _mask_response(config)
+        raise HTTPException(status_code=409, detail=e.detail) from None
+    return _to_response(config)
 
 
 # ========== GET /sso/config/{org_id} — read ==========
@@ -68,7 +66,7 @@ async def get_one(
     config = await get_sso_config(db, org_id)
     if config is None:
         raise HTTPException(status_code=404, detail="SSO config not found")
-    return _mask_response(config)
+    return _to_response(config)
 
 
 # ========== DELETE /sso/config/{org_id} — delete ==========

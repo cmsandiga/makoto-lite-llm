@@ -23,7 +23,7 @@ class SSOConfigResponse(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _mask_secret(cls, data: object) -> object:
-        """When constructing from an ORM model, map client_secret_encrypted → client_secret = '***'."""
+        """Map ORM client_secret_encrypted to masked client_secret."""
         if hasattr(data, "client_secret_encrypted"):
             # ORM model — always mask
             return {
