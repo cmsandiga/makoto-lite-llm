@@ -2,6 +2,7 @@ import pytest
 from uuid_extensions import uuid7
 
 from app.auth.crypto import decrypt
+from app.exceptions import DuplicateError
 from app.models.organization import Organization
 from app.services.sso_service import create_sso_config
 
@@ -36,3 +37,24 @@ async def test_create_sso_config(db_session):
     assert config.auto_create_user is True
     assert config.default_role == "member"
     assert config.is_active is True
+
+
+async def test_create_sso_config_duplicate_org(db_session):
+    org = await _create_org(db_session)
+    await create_sso_config(
+        db_session,
+        org_id=org.id,
+        provider="google",
+        client_id="id1",
+        client_secret="secret1",
+        issuer_url="https://accounts.google.com",
+    )
+    with pytest.raises(DuplicateError):
+        await create_sso_config(
+            db_session,
+            org_id=org.id,
+            provider="okta",
+            client_id="id2",
+            client_secret="secret2",
+            issuer_url="https://okta.example.com",
+        )
