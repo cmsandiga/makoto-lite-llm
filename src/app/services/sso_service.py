@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,3 +45,20 @@ async def create_sso_config(
     await db.commit()
     await db.refresh(config)
     return config
+
+
+async def get_sso_config(db: AsyncSession, org_id: uuid.UUID) -> SSOConfig | None:
+    """Return the SSO config for an org, or None."""
+    result = await db.execute(
+        select(SSOConfig).where(SSOConfig.org_id == org_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_sso_config(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """Delete the SSO config for an org. Returns True if deleted, False if not found."""
+    result = await db.execute(
+        delete(SSOConfig).where(SSOConfig.org_id == org_id)
+    )
+    await db.commit()
+    return result.rowcount > 0
