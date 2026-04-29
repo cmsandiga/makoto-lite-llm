@@ -176,3 +176,51 @@ async def _e2e_db_cleanup(app_server):
     async with database.engine.begin() as conn:
         tables = ", ".join(_TABLES_TO_TRUNCATE)
         await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+
+import uuid
+from dataclasses import dataclass
+
+
+@dataclass
+class E2ESSOOrg:
+    id: uuid.UUID
+    slug: str
+
+
+@pytest.fixture
+async def sso_org(e2e_db_session, keycloak_issuer_url) -> E2ESSOOrg:
+    """Create Organization + Budget + SSOConfig pointing at the Keycloak realm.
+
+    Returns a small value object so tests can reference the org's id/slug
+    without holding onto an ORM instance (which would detach after
+    session scope ends).
+    """
+    from app.models.budget import Budget
+    from app.models.organization import Organization
+    from app.services.sso_service import create_sso_config
+
+    budget = Budget(name="sso-test-budget", max_budget=1000)
+    e2e_db_session.add(budget)
+    await e2e_db_session.flush()
+
+    slug = f"sso-test-{uuid.uuid4().hex[:8]}"
+    org = Organization(name="SSO Test Org", slug=slug, budget_id=budget.id)
+    e2e_db_session.add(org)
+    await e2e_db_session.commit()
+    await e2e_db_session.refresh(org)
+
+    await create_sso_config(
+        e2e_db_session,
+        org_id=org.id,
+        provider="keycloak",
+        client_id="app",
+        client_secret="secret",
+        issuer_url=keycloak_issuer_url,
+        allowed_domains=["example.com"],
+        group_to_team_mapping=None,
+        auto_create_user=True,
+        default_role="member",
+    )
+
+    return E2ESSOOrg(id=org.id, slug=slug)

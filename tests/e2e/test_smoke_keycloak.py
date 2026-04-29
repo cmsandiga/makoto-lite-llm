@@ -53,3 +53,16 @@ async def test_db_cleanup_between_tests(e2e_db_session):
     assert result.scalar_one_or_none() is None, (
         "Truncate cleanup should have removed the previous test's org"
     )
+
+
+@pytest.mark.e2e
+async def test_sso_org_fixture_creates_config(sso_org, e2e_db_session):
+    from app.models.sso_config import SSOConfig
+
+    result = await e2e_db_session.execute(
+        select(SSOConfig).where(SSOConfig.org_id == sso_org.id)
+    )
+    config = result.scalar_one()
+    assert config.provider == "keycloak"
+    assert config.client_id == "app"
+    assert config.allowed_domains == ["example.com"]
