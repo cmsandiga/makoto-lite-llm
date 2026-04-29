@@ -43,3 +43,89 @@ def keycloak_issuer_url(keycloak_container) -> str:
     """URL of the imported litellm realm."""
     base = keycloak_container.get_url().rstrip("/")
     return f"{base}/realms/litellm"
+
+
+import asyncio
+import socket
+import threading
+import time
+
+import httpx
+import uvicorn
+
+
+def _reserve_free_port() -> int:
+    """Bind to 127.0.0.1:0, read the assigned port, release the socket."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@pytest.fixture(scope="session")
+def app_server(postgres_container):
+    """Start uvicorn in a background thread; yield the base URL.
+
+    Depends on postgres_container so the app's engine has a reachable DB.
+    Patches `app.database.engine` + `AsyncSessionLocal` to point at the
+    testcontainer; restores them on teardown.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app import database
+    from app.config import settings
+    from app.main import app
+    from app.models import Base
+
+    pg_url = postgres_container.get_connection_url().replace("psycopg2", "asyncpg")
+    new_engine = create_async_engine(pg_url, echo=False)
+    new_sessionmaker = async_sessionmaker(new_engine, expire_on_commit=False)
+    old_engine = database.engine
+    old_sessionmaker = database.AsyncSessionLocal
+    database.engine = new_engine
+    database.AsyncSessionLocal = new_sessionmaker
+
+    async def _create() -> None:
+        async with new_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_create())
+
+    port = _reserve_free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    old_base_url = settings.base_url
+    settings.base_url = base_url
+
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning", lifespan="on"
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(f"{base_url}/health", timeout=1)
+            if r.status_code == 200:
+                break
+        except httpx.RequestError:
+            pass
+        time.sleep(0.1)
+    else:
+        server.should_exit = True
+        raise RuntimeError("uvicorn app_server did not become ready within 10s")
+
+    yield base_url
+
+    server.should_exit = True
+    thread.join(timeout=5)
+    settings.base_url = old_base_url
+    database.engine = old_engine
+    database.AsyncSessionLocal = old_sessionmaker
+
+    async def _dispose() -> None:
+        await new_engine.dispose()
+
+    asyncio.run(_dispose())

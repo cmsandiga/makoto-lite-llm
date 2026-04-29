@@ -13,3 +13,9 @@ def test_keycloak_discovery_doc(keycloak_issuer_url):
     assert doc["issuer"].endswith("/realms/litellm")
     assert "token_endpoint" in doc
     assert "userinfo_endpoint" in doc
+
+
+@pytest.mark.e2e
+def test_app_server_health(app_server):
+    resp = httpx.get(f"{app_server}/health", timeout=5)
+    assert resp.status_code == 200
