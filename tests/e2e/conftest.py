@@ -3,11 +3,21 @@
 Activated only via `pytest -m e2e` per the addopts in pyproject.toml.
 """
 
+import asyncio
 import os
+import socket
 import sys
+import threading
+import time
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import pytest
+import uvicorn
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.keycloak import KeycloakContainer
 
 # Same Colima override pattern as the top-level conftest.
@@ -43,15 +53,6 @@ def keycloak_issuer_url(keycloak_container) -> str:
     """URL of the imported litellm realm."""
     base = keycloak_container.get_url().rstrip("/")
     return f"{base}/realms/litellm"
-
-
-import asyncio
-import socket
-import threading
-import time
-
-import httpx
-import uvicorn
 
 
 def _reserve_free_port() -> int:
@@ -97,6 +98,12 @@ def app_server(postgres_container):
     base_url = f"http://127.0.0.1:{port}"
     old_base_url = settings.base_url
     settings.base_url = base_url
+    # Point the post-SSO dashboard redirect at our own /health so the
+    # browser navigation succeeds (default is localhost:3000 which is
+    # not running in tests). The query string carries the JWTs we
+    # assert on.
+    old_dashboard_url = settings.sso_dashboard_redirect_url
+    settings.sso_dashboard_redirect_url = f"{base_url}/health"
 
     config = uvicorn.Config(
         app, host="127.0.0.1", port=port, log_level="warning", lifespan="on"
@@ -123,6 +130,7 @@ def app_server(postgres_container):
     server.should_exit = True
     thread.join(timeout=5)
     settings.base_url = old_base_url
+    settings.sso_dashboard_redirect_url = old_dashboard_url
     database.engine = old_engine
     database.AsyncSessionLocal = old_sessionmaker
 
@@ -130,10 +138,6 @@ def app_server(postgres_container):
         await new_engine.dispose()
 
     asyncio.run(_dispose())
-
-
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture
@@ -176,10 +180,6 @@ async def _e2e_db_cleanup(app_server):
     async with database.engine.begin() as conn:
         tables = ", ".join(_TABLES_TO_TRUNCATE)
         await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
-
-
-import uuid
-from dataclasses import dataclass
 
 
 @dataclass

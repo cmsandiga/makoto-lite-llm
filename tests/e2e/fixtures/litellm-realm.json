@@ -10,7 +10,7 @@
       "publicClient": false,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["http://127.0.0.1:*/sso/callback"],
+      "redirectUris": ["*"],
       "webOrigins": ["+"],
       "protocol": "openid-connect"
     }
