@@ -25,6 +25,13 @@ dependencies = [
     "uvicorn[standard]>=0.42.0",
 ]
 
+[project.optional-dependencies]
+e2e = [
+    "playwright>=1.48.0",
+    "pytest-playwright>=0.6.2",
+    "testcontainers[keycloak]>=4.14.2",
+]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
@@ -47,6 +54,10 @@ packages = ["src/app"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: full end-to-end tests that boot containers and a browser; run with `pytest -m e2e`",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers",
 ]

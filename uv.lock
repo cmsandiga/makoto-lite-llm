@@ -3,6 +3,15 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
+name = "aiofiles"
+version = "25.1.0"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+sdist = { url = "https://pypi.cicd.nubank.world/simple/aiofiles/25.1.0/aiofiles-25.1.0.tar.gz", hash = "sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/aiofiles/25.1.0/aiofiles-25.1.0-py3-none-any.whl", hash = "sha256:abe311e527c862958650f9438e859c1fa7568a141b22abcd015e120e86a85695" },
+]
+
+[[package]]
 name = "alembic"
 version = "1.18.4"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -432,6 +441,18 @@ wheels = [
 ]
 
 [[package]]
+name = "deprecation"
+version = "2.1.0"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/deprecation/2.1.0/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/deprecation/2.1.0/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a" },
+]
+
+[[package]]
 name = "dnspython"
 version = "2.8.0"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -700,6 +721,19 @@ wheels = [
 ]
 
 [[package]]
+name = "jwcrypto"
+version = "1.5.7"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/jwcrypto/1.5.7/jwcrypto-1.5.7.tar.gz", hash = "sha256:70204d7cca406eda8c82352e3c41ba2d946610dafd19e54403f0a1f4f18633c6" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/jwcrypto/1.5.7/jwcrypto-1.5.7-py3-none-any.whl", hash = "sha256:729463fefe28b6de5cf1ebfda3e94f1a1b41d2799148ef98a01cb9678ebe2bb0" },
+]
+
+[[package]]
 name = "librt"
 version = "0.8.1"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -806,6 +840,13 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+e2e = [
+    { name = "playwright" },
+    { name = "pytest-playwright" },
+    { name = "testcontainers", extra = ["keycloak"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
@@ -827,14 +868,18 @@ requires-dist = [
     { name = "email-validator", specifier = ">=2.3.0" },
     { name = "fastapi", specifier = ">=0.135.2" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "playwright", marker = "extra == 'e2e'", specifier = ">=1.48.0" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12.1" },
+    { name = "pytest-playwright", marker = "extra == 'e2e'", specifier = ">=0.6.2" },
     { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "redis", extras = ["hiredis"], specifier = ">=7.4.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.48" },
+    { name = "testcontainers", extras = ["keycloak"], marker = "extra == 'e2e'", specifier = ">=4.14.2" },
     { name = "uuid7", specifier = ">=0.1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.42.0" },
 ]
+provides-extras = ["e2e"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -988,6 +1033,25 @@ wheels = [
 ]
 
 [[package]]
+name = "playwright"
+version = "1.59.0"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "greenlet" },
+    { name = "pyee" },
+]
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-macosx_10_13_x86_64.whl", hash = "sha256:bfc6940100b57423175c819ce2422ec5880d55fa2769987f62ab7a1f5fe6783e" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:af068143a0c045ec11608b67d6c42e58db7e9cf65a742dd21fddedc1a9802c47" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-macosx_11_0_universal2.whl", hash = "sha256:4a4a2d4842b0e4120de3fa48636e4b69085a05b81d8a35ad4353f530ade72ed6" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-manylinux1_x86_64.whl", hash = "sha256:c5792aad9e22b91a09264b9edbc18553cf05ea5a39404d65dc19a012c6b2e51d" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8c881a19377d2b900af855fb525b5f22a27bf3cfbecba6d1edb36766d56cb100" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-win32.whl", hash = "sha256:6989c476be2b9cd3e24a18cc9dcf202e266fb3d91e3e5395cd668c54ea54b119" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-win_amd64.whl", hash = "sha256:d5a5cc064b82ca92996080025710844e417f44df8fda9001102c28f44174171c" },
+    { url = "https://pypi.cicd.nubank.world/simple/playwright/1.59.0/playwright-1.59.0-py3-none-win_arm64.whl", hash = "sha256:93581ad515728cadc8af39b288a5633ba6d36e7d72048e79d890ce01ea2156f9" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -1132,6 +1196,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyee"
+version = "13.0.1"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/pyee/13.0.1/pyee-13.0.1.tar.gz", hash = "sha256:0b931f7c14535667ed4c7e0d531716368715e860b988770fc7eb8578d1f67fc8" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/pyee/13.0.1/pyee-13.0.1-py3-none-any.whl", hash = "sha256:af2f8fede4171ef667dfded53f96e2ed0d6e6bd7ee3bb46437f77e3b57689228" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -1184,6 +1260,34 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-base-url"
+version = "2.1.0"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "pytest" },
+    { name = "requests" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/pytest-base-url/2.1.0/pytest_base_url-2.1.0.tar.gz", hash = "sha256:02748589a54f9e63fcbe62301d6b0496da0d10231b753e950c63e03aee745d45" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/pytest-base-url/2.1.0/pytest_base_url-2.1.0-py3-none-any.whl", hash = "sha256:3ad15611778764d451927b2a53240c1a7a591b521ea44cebfe45849d2d2812e6" },
+]
+
+[[package]]
+name = "pytest-playwright"
+version = "0.7.2"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "playwright" },
+    { name = "pytest" },
+    { name = "pytest-base-url" },
+    { name = "python-slugify" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/pytest-playwright/0.7.2/pytest_playwright-0.7.2.tar.gz", hash = "sha256:247b61123b28c7e8febb993a187a07e54f14a9aa04edc166f7a976d88f04c770" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/pytest-playwright/0.7.2/pytest_playwright-0.7.2-py3-none-any.whl", hash = "sha256:8084e015b2b3ecff483c2160f1c8219b38b66c0d4578b23c0f700d1b0240ea38" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.2"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
@@ -1193,12 +1297,41 @@ wheels = [
 ]
 
 [[package]]
+name = "python-keycloak"
+version = "7.1.1"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "deprecation" },
+    { name = "httpx" },
+    { name = "jwcrypto" },
+    { name = "requests" },
+    { name = "requests-toolbelt" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/python-keycloak/7.1.1/python_keycloak-7.1.1.tar.gz", hash = "sha256:38973e54694a656fe6f3f8fc2af0b89c78136863f928261f0d243445e9e486bc" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/python-keycloak/7.1.1/python_keycloak-7.1.1-py3-none-any.whl", hash = "sha256:d8295bec6c4805ab7335b03bc92753c8c6258d5511b080cac061da20ae77f61c" },
+]
+
+[[package]]
 name = "python-multipart"
 version = "0.0.22"
 source = { registry = "https://pypi.cicd.nubank.world/simple/" }
 sdist = { url = "https://pypi.cicd.nubank.world/simple/python-multipart/0.0.22/python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58" }
 wheels = [
     { url = "https://pypi.cicd.nubank.world/simple/python-multipart/0.0.22/python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155" },
+]
+
+[[package]]
+name = "python-slugify"
+version = "8.0.4"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "text-unidecode" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/python-slugify/8.0.4/python-slugify-8.0.4.tar.gz", hash = "sha256:59202371d1d05b54a9e7720c5e038f928f45daaffe41dd10822f3907b937c856" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/python-slugify/8.0.4/python_slugify-8.0.4-py2.py3-none-any.whl", hash = "sha256:276540b79961052b66b7d116620b36518847f52d5fd9e3a70164fc8c50faa6b8" },
 ]
 
 [[package]]
@@ -1305,6 +1438,18 @@ dependencies = [
 sdist = { url = "https://pypi.cicd.nubank.world/simple/requests/2.33.0/requests-2.33.0.tar.gz", hash = "sha256:c7ebc5e8b0f21837386ad0e1c8fe8b829fa5f544d8df3b2253bff14ef29d7652" }
 wheels = [
     { url = "https://pypi.cicd.nubank.world/simple/requests/2.33.0/requests-2.33.0-py3-none-any.whl", hash = "sha256:3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b" },
+]
+
+[[package]]
+name = "requests-toolbelt"
+version = "1.0.0"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://pypi.cicd.nubank.world/simple/requests-toolbelt/1.0.0/requests-toolbelt-1.0.0.tar.gz", hash = "sha256:7681a0a3d047012b5bdc0ee37d7f8f07ebe76ab08caeccfc3921ce23c88d5bc6" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/requests-toolbelt/1.0.0/requests_toolbelt-1.0.0-py2.py3-none-any.whl", hash = "sha256:cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06" },
 ]
 
 [[package]]
@@ -1432,8 +1577,20 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+keycloak = [
+    { name = "python-keycloak", marker = "python_full_version < '4'" },
+]
 redis = [
     { name = "redis" },
+]
+
+[[package]]
+name = "text-unidecode"
+version = "1.3"
+source = { registry = "https://pypi.cicd.nubank.world/simple/" }
+sdist = { url = "https://pypi.cicd.nubank.world/simple/text-unidecode/1.3/text-unidecode-1.3.tar.gz", hash = "sha256:bad6603bb14d279193107714b288be206cac565dfa49aa5b105294dd5c4aab93" }
+wheels = [
+    { url = "https://pypi.cicd.nubank.world/simple/text-unidecode/1.3/text_unidecode-1.3-py2.py3-none-any.whl", hash = "sha256:1311f10e8b895935241623731c2ba64f4c455287888b18189350b67134a822e8" },
 ]
 
 [[package]]
