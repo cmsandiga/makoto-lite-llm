@@ -1,0 +1,35 @@
+{
+  "realm": "litellm",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "app",
+      "enabled": true,
+      "secret": "secret",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:*/sso/callback"],
+      "webOrigins": ["+"],
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
