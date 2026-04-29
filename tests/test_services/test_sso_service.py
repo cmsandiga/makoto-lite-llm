@@ -1,4 +1,6 @@
+import httpx
 import pytest
+import respx
 from uuid_extensions import uuid7
 
 from app.auth.crypto import decrypt
@@ -114,7 +116,22 @@ async def test_delete_sso_config_not_found(db_session):
     assert result is False
 
 
+@respx.mock
 async def test_build_authorize_url(db_session):
+    issuer = "https://accounts.google.com"
+    auth_endpoint = f"{issuer}/o/oauth2/v2/auth"
+    respx.get(f"{issuer}/.well-known/openid-configuration").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "issuer": issuer,
+                "authorization_endpoint": auth_endpoint,
+                "token_endpoint": f"{issuer}/o/oauth2/token",
+                "userinfo_endpoint": f"{issuer}/oauth2/v3/userinfo",
+                "jwks_uri": f"{issuer}/oauth2/v3/certs",
+            },
+        )
+    )
     org = await _create_org(db_session)
     await create_sso_config(
         db_session,
@@ -122,14 +139,14 @@ async def test_build_authorize_url(db_session):
         provider="google",
         client_id="goog-123",
         client_secret="secret",
-        issuer_url="https://accounts.google.com",
+        issuer_url=issuer,
     )
     url, state = await build_authorize_url(
         db_session,
         org_id=org.id,
         callback_url="http://localhost:8000/sso/callback",
     )
-    assert "https://accounts.google.com/authorize" in url
+    assert auth_endpoint in url
     assert "client_id=goog-123" in url
     assert "redirect_uri=http" in url
     assert "response_type=code" in url
