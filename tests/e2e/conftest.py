@@ -72,6 +72,7 @@ def app_server(postgres_container):
     testcontainer; restores them on teardown.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
 
     from app import database
     from app.config import settings
@@ -79,7 +80,7 @@ def app_server(postgres_container):
     from app.models import Base
 
     pg_url = postgres_container.get_connection_url().replace("psycopg2", "asyncpg")
-    new_engine = create_async_engine(pg_url, echo=False)
+    new_engine = create_async_engine(pg_url, echo=False, poolclass=NullPool)
     new_sessionmaker = async_sessionmaker(new_engine, expire_on_commit=False)
     old_engine = database.engine
     old_sessionmaker = database.AsyncSessionLocal
@@ -129,3 +130,49 @@ def app_server(postgres_container):
         await new_engine.dispose()
 
     asyncio.run(_dispose())
+
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+@pytest.fixture
+async def e2e_db_session(app_server) -> AsyncSession:
+    """A real session on the app's (now-overridden) engine.
+
+    No savepoint wrapper — commits are real. Relies on _e2e_db_cleanup
+    (autouse) to TRUNCATE after each test.
+    """
+    from app import database
+
+    async with database.AsyncSessionLocal() as session:
+        yield session
+
+
+_TABLES_TO_TRUNCATE = [
+    "audit_log",
+    "refresh_tokens",
+    "team_memberships",
+    "org_memberships",
+    "sso_configs",
+    "api_keys",
+    "users",
+    "teams",
+    "organizations",
+    "budgets",
+]
+
+
+@pytest.fixture(autouse=True)
+async def _e2e_db_cleanup(app_server):
+    """After each test, TRUNCATE all tables the flow touches.
+
+    CASCADE handles FK dependencies; the order in _TABLES_TO_TRUNCATE
+    is informational.
+    """
+    yield
+    from app import database
+
+    async with database.engine.begin() as conn:
+        tables = ", ".join(_TABLES_TO_TRUNCATE)
+        await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
