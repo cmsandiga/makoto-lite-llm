@@ -170,7 +170,22 @@ async def test_delete_sso_config_not_found(client, db_session):
 # ========== GET /sso/authorize ==========
 
 
+@respx.mock
 async def test_authorize_redirect(client, db_session):
+    issuer = "https://accounts.google.com"
+    auth_endpoint = f"{issuer}/o/oauth2/v2/auth"
+    respx.get(f"{issuer}/.well-known/openid-configuration").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "issuer": issuer,
+                "authorization_endpoint": auth_endpoint,
+                "token_endpoint": f"{issuer}/o/oauth2/token",
+                "userinfo_endpoint": f"{issuer}/oauth2/v3/userinfo",
+                "jwks_uri": f"{issuer}/oauth2/v3/certs",
+            },
+        )
+    )
     admin, org = await _setup(db_session)
     headers = _admin_headers(admin.id)
     await client.post(
@@ -180,7 +195,7 @@ async def test_authorize_redirect(client, db_session):
             "provider": "google",
             "client_id": "goog-123",
             "client_secret": "secret",
-            "issuer_url": "https://accounts.google.com",
+            "issuer_url": issuer,
         },
         headers=headers,
     )
@@ -191,7 +206,7 @@ async def test_authorize_redirect(client, db_session):
     )
     assert response.status_code == 307
     location = response.headers["location"]
-    assert "https://accounts.google.com/authorize" in location
+    assert auth_endpoint in location
     assert "client_id=goog-123" in location
     assert "response_type=code" in location
 

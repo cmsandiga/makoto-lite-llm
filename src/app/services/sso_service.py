@@ -14,6 +14,7 @@ from app.exceptions import DuplicateError
 from app.models.membership import OrgMembership, TeamMembership
 from app.models.sso_config import SSOConfig
 from app.models.user import User
+from app.services.oidc_client import OIDCClient
 
 # In-memory state store with 10-minute TTL for CSRF protection.
 # Key: state token, Value: {"verifier": str, "org_id": UUID}.
@@ -112,7 +113,9 @@ async def build_authorize_url(
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     })
-    url = f"{config.issuer_url}/authorize?{params}"
+    discovery = await OIDCClient(issuer_url=config.issuer_url).discover()
+    auth_endpoint = discovery["authorization_endpoint"]
+    url = f"{auth_endpoint}?{params}"
     return url, state
 
 
