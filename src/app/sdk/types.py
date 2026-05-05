@@ -1,4 +1,10 @@
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from app.sdk.providers.base import BaseProvider
 
 
 class FunctionCall(BaseModel):
@@ -75,7 +81,12 @@ class StreamWrapper:
     (skip).
     """
 
-    def __init__(self, chunk_iter, provider, model: str):
+    def __init__(
+        self,
+        chunk_iter: "AsyncIterator[dict]",
+        provider: "BaseProvider",
+        model: str,
+    ):
         self._chunk_iter = chunk_iter
         self._provider = provider
         self._model = model
@@ -86,14 +97,14 @@ class StreamWrapper:
     async def __anext__(self) -> ModelResponseStream:
         from app.sdk.http_client import _StreamingHTTPError
 
-        try:
-            chunk = await self._chunk_iter.__anext__()
-        except _StreamingHTTPError as e:
-            raise self._provider.get_error_class(e.status_code, e.body) from None
-        result = self._provider.transform_stream_chunk(chunk, self._model)
-        if result is None:
-            return await self.__anext__()
-        return result
+        while True:
+            try:
+                chunk = await self._chunk_iter.__anext__()
+            except _StreamingHTTPError as e:
+                raise self._provider.get_error_class(e.status_code, e.body) from None
+            result = self._provider.transform_stream_chunk(chunk, self._model)
+            if result is not None:
+                return result
 
     async def aclose(self) -> None:
         if hasattr(self._chunk_iter, "aclose"):
