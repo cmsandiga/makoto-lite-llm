@@ -46,3 +46,28 @@ def test_catalog_locked_to_known_prices():
     assert prices["openai/gpt-4o"]["input_cost_per_token"] == 2.5e-6
     assert prices["openai/gpt-4o-mini"]["output_cost_per_token"] == 6.0e-7
     assert prices["openai/gpt-3.5-turbo"]["input_cost_per_token"] == 5.0e-7
+
+
+def test_anthropic_models_present_in_catalog():
+    _reset_cache()
+    prices = cost_module._load()
+    assert "anthropic/claude-opus-4-7" in prices
+    assert "anthropic/claude-sonnet-4-6" in prices
+    assert "anthropic/claude-haiku-4-5-20251001" in prices
+
+
+def test_anthropic_haiku_cost_calc():
+    _reset_cache()
+    usage = Usage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+    c = calculate_cost("anthropic/claude-haiku-4-5-20251001", usage)
+    # 1000 * 8.0e-7 + 500 * 4.0e-6 = 8e-4 + 2e-3 = 0.0028
+    assert c == pytest.approx(0.0028, rel=1e-9)
+
+
+def test_anthropic_catalog_pinned_prices():
+    """Pin the Anthropic catalog so a typo in JSON fails CI loudly."""
+    _reset_cache()
+    prices = cost_module._load()
+    assert prices["anthropic/claude-opus-4-7"]["input_cost_per_token"] == 1.5e-5
+    assert prices["anthropic/claude-sonnet-4-6"]["output_cost_per_token"] == 1.5e-5
+    assert prices["anthropic/claude-haiku-4-5-20251001"]["input_cost_per_token"] == 8.0e-7

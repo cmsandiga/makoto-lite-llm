@@ -34,5 +34,32 @@
     "supports_tools": true,
     "supports_vision": false,
     "mode": "chat"
+  },
+  "anthropic/claude-opus-4-7": {
+    "input_cost_per_token": 1.5e-5,
+    "output_cost_per_token": 7.5e-5,
+    "max_input_tokens": 200000,
+    "max_output_tokens": 32000,
+    "supports_tools": true,
+    "supports_vision": true,
+    "mode": "chat"
+  },
+  "anthropic/claude-sonnet-4-6": {
+    "input_cost_per_token": 3.0e-6,
+    "output_cost_per_token": 1.5e-5,
+    "max_input_tokens": 200000,
+    "max_output_tokens": 64000,
+    "supports_tools": true,
+    "supports_vision": true,
+    "mode": "chat"
+  },
+  "anthropic/claude-haiku-4-5-20251001": {
+    "input_cost_per_token": 8.0e-7,
+    "output_cost_per_token": 4.0e-6,
+    "max_input_tokens": 200000,
+    "max_output_tokens": 8192,
+    "supports_tools": true,
+    "supports_vision": true,
+    "mode": "chat"
   }
 }
