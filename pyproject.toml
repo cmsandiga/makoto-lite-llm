@@ -54,9 +54,10 @@ packages = ["src/app"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not live'"
 markers = [
     "e2e: full end-to-end tests that boot containers and a browser; run with `pytest -m e2e`",
+    "live: tests that hit real third-party APIs and need credentials; run with `pytest -m live`",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers",
