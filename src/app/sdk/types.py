@@ -41,3 +41,26 @@ class ModelResponse(BaseModel):
     model: str
     choices: list[Choice]
     usage: Usage | None = None
+
+
+class Delta(BaseModel):
+    role: str | None = None
+    content: str | None = None
+    tool_calls: list[ToolCall] | None = None
+
+
+class StreamChoice(BaseModel):
+    index: int
+    delta: Delta
+    finish_reason: str | None = None
+
+
+class ModelResponseStream(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: list[StreamChoice]
+    usage: Usage | None = None
