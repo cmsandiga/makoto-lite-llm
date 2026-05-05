@@ -556,3 +556,10 @@ def test_error_unknown_status_falls_back_to_litellm_error():
     p = AnthropicProvider()
     err = p.get_error_class(418, {"error": {"message": "teapot"}})
     assert type(err) is LiteLLMError
+
+
+def test_provider_is_registered():
+    """Importing the providers package side-effects register_provider('anthropic', ...)."""
+    from app.sdk.providers.base import PROVIDER_REGISTRY
+
+    assert PROVIDER_REGISTRY["anthropic"] is AnthropicProvider
