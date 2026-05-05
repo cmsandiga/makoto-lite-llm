@@ -64,3 +64,37 @@ class ModelResponseStream(BaseModel):
     model: str
     choices: list[StreamChoice]
     usage: Usage | None = None
+
+
+class StreamWrapper:
+    """Async iterator wrapping a parsed-chunk source. Owns the response lifecycle.
+
+    The underlying source yields parsed dicts (already SSE-decoded by
+    LLMHttpClient.post_stream). Each dict is passed through the provider's
+    transform_stream_chunk, which returns a ModelResponseStream or None
+    (skip).
+    """
+
+    def __init__(self, chunk_iter, provider, model: str):
+        self._chunk_iter = chunk_iter
+        self._provider = provider
+        self._model = model
+
+    def __aiter__(self) -> "StreamWrapper":
+        return self
+
+    async def __anext__(self) -> ModelResponseStream:
+        from app.sdk.http_client import _StreamingHTTPError
+
+        try:
+            chunk = await self._chunk_iter.__anext__()
+        except _StreamingHTTPError as e:
+            raise self._provider.get_error_class(e.status_code, e.body) from None
+        result = self._provider.transform_stream_chunk(chunk, self._model)
+        if result is None:
+            return await self.__anext__()
+        return result
+
+    async def aclose(self) -> None:
+        if hasattr(self._chunk_iter, "aclose"):
+            await self._chunk_iter.aclose()
