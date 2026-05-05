@@ -46,7 +46,13 @@ def test_model_response_allows_extra_fields():
         id="chatcmpl-1",
         created=1700000000,
         model="gpt-4o",
-        choices=[Choice(index=0, message=Message(role="assistant", content="ok"), finish_reason="stop")],
+        choices=[
+            Choice(
+                index=0,
+                message=Message(role="assistant", content="ok"),
+                finish_reason="stop",
+            )
+        ],
         usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
         system_fingerprint="fp_xyz",  # extra field — should not raise
         service_tier="default",
