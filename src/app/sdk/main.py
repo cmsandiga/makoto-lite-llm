@@ -54,7 +54,10 @@ async def acompletion(
     client = get_http_client()
 
     if stream:
-        raise NotImplementedError("streaming wired up in next task")
+        chunk_iter = client.post_stream(
+            base, resolved_key, path, headers, body, timeout=timeout
+        )
+        return StreamWrapper(chunk_iter, provider, bare_model)
 
     status, raw = await client.post(
         base, resolved_key, path, headers, body, timeout=timeout

@@ -5,7 +5,7 @@ import respx
 from app.sdk import http_client as http_client_module
 from app.sdk.exceptions import AuthenticationError, RateLimitError
 from app.sdk.main import acompletion
-from app.sdk.types import ModelResponse
+from app.sdk.types import ModelResponse, ModelResponseStream, StreamWrapper
 
 
 @pytest.fixture(autouse=True)
@@ -135,3 +135,56 @@ async def test_acompletion_429_maps_to_rate_limit_error():
             messages=[{"role": "user", "content": "hi"}],
             api_key="sk-test",
         )
+
+
+@respx.mock
+async def test_acompletion_stream_returns_wrapper():
+    body = (
+        b'data: {"id":"c1","created":1,"model":"gpt-4o",'
+        b'"choices":[{"index":0,"delta":'
+        b'{"role":"assistant","content":"He"}}]}\n\n'
+        b'data: {"id":"c1","created":1,"model":"gpt-4o",'
+        b'"choices":[{"index":0,"delta":{"content":"llo"},'
+        b'"finish_reason":"stop"}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    result = await acompletion(
+        model="openai/gpt-4o",
+        messages=[{"role": "user", "content": "hi"}],
+        api_key="sk-test",
+        stream=True,
+    )
+    assert isinstance(result, StreamWrapper)
+
+    chunks: list[ModelResponseStream] = []
+    async for chunk in result:
+        chunks.append(chunk)
+    assert len(chunks) == 2
+    assert chunks[0].choices[0].delta.content == "He"
+    assert chunks[1].choices[0].delta.content == "llo"
+    assert chunks[1].choices[0].finish_reason == "stop"
+
+
+@respx.mock
+async def test_acompletion_stream_429_raises_on_first_anext():
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            429, json={"error": {"message": "slow"}}
+        )
+    )
+
+    result = await acompletion(
+        model="openai/gpt-4o",
+        messages=[{"role": "user", "content": "hi"}],
+        api_key="sk-test",
+        stream=True,
+    )
+    with pytest.raises(RateLimitError):
+        async for _ in result:
+            pass
