@@ -352,3 +352,98 @@ def test_transform_response_synthesizes_created_field():
     p = AnthropicProvider()
     resp = p.transform_response(raw, "claude-sonnet-4-6")
     assert resp.created > 0  # any positive integer (current time)
+
+
+# ---- transform_stream_chunk ----
+
+def test_transform_stream_chunk_text_delta():
+    chunk = {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": "Hel"},
+    }
+    p = AnthropicProvider()
+    parsed = p.transform_stream_chunk(chunk, "claude-sonnet-4-6")
+    assert parsed is not None
+    assert parsed.choices[0].delta.content == "Hel"
+    assert parsed.choices[0].delta.tool_calls is None
+
+
+def test_transform_stream_chunk_input_json_delta():
+    chunk = {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {"type": "input_json_delta", "partial_json": '{"ci'},
+    }
+    p = AnthropicProvider()
+    parsed = p.transform_stream_chunk(chunk, "claude-sonnet-4-6")
+    assert parsed is not None
+    tcs = parsed.choices[0].delta.tool_calls
+    assert tcs is not None
+    assert len(tcs) == 1
+    assert tcs[0].function.arguments == '{"ci'
+    # content should be None for tool-arg-only chunks
+    assert parsed.choices[0].delta.content is None
+
+
+def test_transform_stream_chunk_message_start_returns_none():
+    chunk = {
+        "type": "message_start",
+        "message": {
+            "id": "msg_1",
+            "model": "claude-sonnet-4-6",
+            "usage": {"input_tokens": 10, "output_tokens": 0},
+        },
+    }
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+def test_transform_stream_chunk_content_block_start_returns_none():
+    chunk = {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "text", "text": ""},
+    }
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+def test_transform_stream_chunk_content_block_stop_returns_none():
+    chunk = {"type": "content_block_stop", "index": 0}
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+def test_transform_stream_chunk_message_delta_yields_finish_and_usage():
+    chunk = {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "usage": {"output_tokens": 7},
+    }
+    p = AnthropicProvider()
+    parsed = p.transform_stream_chunk(chunk, "claude-sonnet-4-6")
+    assert parsed is not None
+    assert parsed.choices[0].finish_reason == "stop"
+    assert parsed.usage is not None
+    # input_tokens are not in this event; provider stateless => prompt_tokens = 0
+    assert parsed.usage.prompt_tokens == 0
+    assert parsed.usage.completion_tokens == 7
+
+
+def test_transform_stream_chunk_message_stop_returns_none():
+    chunk = {"type": "message_stop"}
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+def test_transform_stream_chunk_ping_returns_none():
+    chunk = {"type": "ping"}
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+def test_transform_stream_chunk_no_type_key_returns_none():
+    chunk = {}
+    p = AnthropicProvider()
+    assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None

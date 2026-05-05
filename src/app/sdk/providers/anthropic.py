@@ -1,14 +1,17 @@
 import json
 import os
 import time
+import uuid
 
 from app.sdk.providers.base import BaseProvider, register_provider
 from app.sdk.types import (
     Choice,
+    Delta,
     FunctionCall,
     Message,
     ModelResponse,
     ModelResponseStream,
+    StreamChoice,
     ToolCall,
     Usage,
 )
@@ -193,7 +196,75 @@ class AnthropicProvider(BaseProvider):
     def transform_stream_chunk(
         self, chunk: dict, model: str
     ) -> ModelResponseStream | None:
-        raise NotImplementedError  # implemented in Task 3
+        chunk_type = chunk.get("type")
+        if chunk_type is None:
+            return None
+
+        if chunk_type == "content_block_delta":
+            delta_obj = chunk.get("delta") or {}
+            delta_type = delta_obj.get("type")
+            if delta_type == "text_delta":
+                return self._build_stream_chunk(
+                    model,
+                    delta=Delta(content=delta_obj.get("text", "")),
+                )
+            if delta_type == "input_json_delta":
+                tool_call = ToolCall(
+                    id="",
+                    type="function",
+                    function=FunctionCall(
+                        name="",
+                        arguments=delta_obj.get("partial_json", ""),
+                    ),
+                )
+                return self._build_stream_chunk(
+                    model,
+                    delta=Delta(tool_calls=[tool_call]),
+                )
+            return None
+
+        if chunk_type == "message_delta":
+            delta_obj = chunk.get("delta") or {}
+            anthropic_reason = delta_obj.get("stop_reason")
+            finish_reason = (
+                _STOP_REASON_MAP.get(anthropic_reason, anthropic_reason)
+                if anthropic_reason is not None
+                else None
+            )
+            u = chunk.get("usage") or {}
+            usage = Usage(
+                prompt_tokens=u.get("input_tokens", 0),
+                completion_tokens=u.get("output_tokens", 0),
+                total_tokens=(
+                    u.get("input_tokens", 0) + u.get("output_tokens", 0)
+                ),
+            )
+            return self._build_stream_chunk(
+                model,
+                delta=Delta(),
+                finish_reason=finish_reason,
+                usage=usage,
+            )
+
+        # message_start, content_block_start, content_block_stop, message_stop, ping
+        return None
+
+    def _build_stream_chunk(
+        self,
+        model: str,
+        delta: Delta,
+        finish_reason: str | None = None,
+        usage: Usage | None = None,
+    ) -> ModelResponseStream:
+        return ModelResponseStream(
+            id=f"chatcmpl-{uuid.uuid4().hex}",
+            created=int(time.time()),
+            model=model,
+            choices=[
+                StreamChoice(index=0, delta=delta, finish_reason=finish_reason)
+            ],
+            usage=usage,
+        )
 
     def get_error_class(self, status_code: int, body: dict) -> Exception:
         raise NotImplementedError  # implemented in Task 4
