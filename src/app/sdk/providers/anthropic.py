@@ -94,6 +94,7 @@ def _extract_system_messages(messages: list[dict]) -> tuple[str | None, list[dic
 
 class AnthropicProvider(BaseProvider):
     name = "anthropic"
+    completions_path = "/messages"
 
     def get_api_base(self, model: str, api_base: str | None) -> str:
         return (

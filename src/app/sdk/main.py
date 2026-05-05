@@ -49,7 +49,7 @@ async def acompletion(
     body = provider.transform_request(bare_model, messages, params)
     headers = provider.get_headers(resolved_key, extra_headers)
     base = provider.get_api_base(bare_model, api_base)
-    path = "/chat/completions"
+    path = provider.completions_path
 
     client = get_http_client()
 

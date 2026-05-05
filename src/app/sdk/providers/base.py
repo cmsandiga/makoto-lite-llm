@@ -11,6 +11,11 @@ class BaseProvider(ABC):
 
     name: str
 
+    # The HTTP path appended to api_base for chat completions.
+    # Override in subclasses with non-OpenAI-compatible endpoints
+    # (e.g. Anthropic uses '/messages'). Default matches the OpenAI shape.
+    completions_path: str = "/chat/completions"
+
     @abstractmethod
     def get_api_base(self, model: str, api_base: str | None) -> str: ...
 
