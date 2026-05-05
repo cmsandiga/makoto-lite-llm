@@ -1,3 +1,16 @@
+from app.sdk.exceptions import (
+    AuthenticationError,
+    BadRequestError,
+    ContextWindowExceededError,
+    InternalServerError,
+    LiteLLMError,
+    NotFoundError,
+    RateLimitError,
+    ServiceUnavailableError,
+)
+from app.sdk.exceptions import (
+    TimeoutError as SdkTimeoutError,
+)
 from app.sdk.providers.anthropic import (
     ANTHROPIC_VERSION,
     DEFAULT_API_BASE,
@@ -447,3 +460,99 @@ def test_transform_stream_chunk_no_type_key_returns_none():
     chunk = {}
     p = AnthropicProvider()
     assert p.transform_stream_chunk(chunk, "claude-sonnet-4-6") is None
+
+
+# ---- get_error_class ----
+
+def test_error_401_authentication():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        401, {"type": "error", "error": {"type": "authentication_error", "message": "bad key"}}
+    )
+    assert isinstance(err, AuthenticationError)
+    assert err.status_code == 401
+
+
+def test_error_403_permission():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        403, {"type": "error", "error": {"type": "permission_error", "message": "no"}}
+    )
+    assert isinstance(err, AuthenticationError)
+
+
+def test_error_404_not_found():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        404, {"type": "error", "error": {"type": "not_found_error", "message": "?"}}
+    )
+    assert isinstance(err, NotFoundError)
+
+
+def test_error_408_timeout():
+    p = AnthropicProvider()
+    err = p.get_error_class(408, {"error": {"message": "slow"}})
+    assert isinstance(err, SdkTimeoutError)
+
+
+def test_error_429_rate_limit():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        429, {"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}}
+    )
+    assert isinstance(err, RateLimitError)
+
+
+def test_error_400_context_message_phrase():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        400,
+        {"type": "error", "error": {
+            "type": "invalid_request_error",
+            "message": "prompt is too long for the context window",
+        }},
+    )
+    assert isinstance(err, ContextWindowExceededError)
+
+
+def test_error_400_max_tokens_phrase():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        400,
+        {"type": "error", "error": {
+            "type": "invalid_request_error",
+            "message": "max_tokens exceeds model maximum",
+        }},
+    )
+    assert isinstance(err, ContextWindowExceededError)
+
+
+def test_error_400_generic_bad_request():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        400,
+        {"type": "error", "error": {"type": "invalid_request_error", "message": "missing field"}},
+    )
+    assert isinstance(err, BadRequestError)
+
+
+def test_error_503_service_unavailable():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        503, {"type": "error", "error": {"type": "overloaded_error", "message": "busy"}}
+    )
+    assert isinstance(err, ServiceUnavailableError)
+
+
+def test_error_500_internal():
+    p = AnthropicProvider()
+    err = p.get_error_class(
+        500, {"type": "error", "error": {"type": "api_error", "message": "boom"}}
+    )
+    assert isinstance(err, InternalServerError)
+
+
+def test_error_unknown_status_falls_back_to_litellm_error():
+    p = AnthropicProvider()
+    err = p.get_error_class(418, {"error": {"message": "teapot"}})
+    assert type(err) is LiteLLMError

@@ -3,6 +3,17 @@ import os
 import time
 import uuid
 
+from app.sdk.exceptions import (
+    AuthenticationError,
+    BadRequestError,
+    ContextWindowExceededError,
+    InternalServerError,
+    LiteLLMError,
+    NotFoundError,
+    RateLimitError,
+    ServiceUnavailableError,
+    TimeoutError,
+)
 from app.sdk.providers.base import BaseProvider, register_provider
 from app.sdk.types import (
     Choice,
@@ -267,7 +278,29 @@ class AnthropicProvider(BaseProvider):
         )
 
     def get_error_class(self, status_code: int, body: dict) -> Exception:
-        raise NotImplementedError  # implemented in Task 4
+        err = body.get("error") or {}
+        msg = err.get("message", str(body))
+        msg_lower = msg.lower()
+
+        if status_code == 401:
+            return AuthenticationError(status_code, msg)
+        if status_code == 403:
+            return AuthenticationError(status_code, msg)
+        if status_code == 404:
+            return NotFoundError(status_code, msg)
+        if status_code == 408:
+            return TimeoutError(status_code, msg)
+        if status_code == 429:
+            return RateLimitError(status_code, msg)
+        if status_code == 400:
+            if "context" in msg_lower or "max_tokens" in msg_lower:
+                return ContextWindowExceededError(status_code, msg)
+            return BadRequestError(status_code, msg)
+        if status_code == 503:
+            return ServiceUnavailableError(status_code, msg)
+        if 500 <= status_code < 600:
+            return InternalServerError(status_code, msg)
+        return LiteLLMError(status_code, msg)
 
 
 register_provider("anthropic", AnthropicProvider)
