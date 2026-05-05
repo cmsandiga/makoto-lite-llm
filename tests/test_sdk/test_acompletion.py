@@ -188,3 +188,35 @@ async def test_acompletion_stream_429_raises_on_first_anext():
     with pytest.raises(RateLimitError):
         async for _ in result:
             pass
+
+
+def test_public_imports():
+    """The public surface — what callers should be able to import."""
+    from app.sdk import (
+        AuthenticationError,
+        BadRequestError,  # noqa: F401
+        Choice,  # noqa: F401
+        ContentPolicyViolationError,  # noqa: F401
+        ContextWindowExceededError,  # noqa: F401
+        Delta,  # noqa: F401
+        FunctionCall,  # noqa: F401
+        InternalServerError,  # noqa: F401
+        LiteLLMError,
+        Message,  # noqa: F401
+        ModelResponse,
+        ModelResponseStream,  # noqa: F401
+        NotFoundError,  # noqa: F401
+        RateLimitError,  # noqa: F401
+        ServiceUnavailableError,  # noqa: F401
+        StreamChoice,  # noqa: F401
+        StreamWrapper,  # noqa: F401
+        ToolCall,  # noqa: F401
+        UnknownProviderError,  # noqa: F401
+        Usage,  # noqa: F401
+        acompletion,
+    )
+
+    # Sanity: callable, types are types
+    assert callable(acompletion)
+    assert isinstance(ModelResponse, type)
+    assert issubclass(AuthenticationError, LiteLLMError)
