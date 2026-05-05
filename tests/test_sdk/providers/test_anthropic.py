@@ -222,3 +222,133 @@ def test_transform_request_drops_top_level_system_kwarg():
         {"system": "from kwarg"},
     )
     assert "system" not in body  # not in allowlist, and no system message present
+
+
+# ---- transform_response ----
+
+def test_transform_response_basic_text():
+    raw = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-6",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 10, "output_tokens": 1},
+    }
+    p = AnthropicProvider()
+    resp = p.transform_response(raw, "claude-sonnet-4-6")
+    assert resp.id == "msg_1"
+    assert resp.model == "claude-sonnet-4-6"
+    assert resp.choices[0].message.role == "assistant"
+    assert resp.choices[0].message.content == "ok"
+    assert resp.choices[0].message.tool_calls is None
+    assert resp.choices[0].finish_reason == "stop"
+    assert resp.usage.prompt_tokens == 10
+    assert resp.usage.completion_tokens == 1
+    assert resp.usage.total_tokens == 11
+
+
+def test_transform_response_multi_text_blocks_concatenated():
+    raw = {
+        "id": "msg_2",
+        "model": "claude-sonnet-4-6",
+        "content": [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": " world"},
+        ],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+    }
+    p = AnthropicProvider()
+    resp = p.transform_response(raw, "claude-sonnet-4-6")
+    assert resp.choices[0].message.content == "Hello world"
+
+
+def test_transform_response_with_tool_use_blocks():
+    raw = {
+        "id": "msg_3",
+        "model": "claude-sonnet-4-6",
+        "content": [
+            {"type": "text", "text": "Let me check."},
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "get_weather",
+                "input": {"city": "sf"},
+            },
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 20, "output_tokens": 5},
+    }
+    p = AnthropicProvider()
+    resp = p.transform_response(raw, "claude-sonnet-4-6")
+    msg = resp.choices[0].message
+    assert msg.content == "Let me check."
+    assert msg.tool_calls is not None
+    assert len(msg.tool_calls) == 1
+    tc = msg.tool_calls[0]
+    assert tc.id == "toolu_1"
+    assert tc.type == "function"
+    assert tc.function.name == "get_weather"
+    assert tc.function.arguments == '{"city": "sf"}'
+    assert resp.choices[0].finish_reason == "tool_calls"
+
+
+def test_transform_response_only_tool_use_content_is_none():
+    """When the model produces only tool_use blocks, content should be None."""
+    raw = {
+        "id": "msg_4",
+        "model": "claude-sonnet-4-6",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "x",
+                "input": {},
+            }
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 5, "output_tokens": 1},
+    }
+    p = AnthropicProvider()
+    resp = p.transform_response(raw, "claude-sonnet-4-6")
+    assert resp.choices[0].message.content is None
+    assert len(resp.choices[0].message.tool_calls) == 1
+
+
+def test_transform_response_stop_reason_mapping():
+    p = AnthropicProvider()
+    cases = [
+        ("end_turn", "stop"),
+        ("max_tokens", "length"),
+        ("tool_use", "tool_calls"),
+        ("stop_sequence", "stop"),
+        ("pause_turn", "pause_turn"),  # passthrough
+    ]
+    for anthropic_reason, expected in cases:
+        raw = {
+            "id": "x",
+            "model": "claude-sonnet-4-6",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": anthropic_reason,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+        resp = p.transform_response(raw, "claude-sonnet-4-6")
+        assert resp.choices[0].finish_reason == expected, (
+            f"{anthropic_reason} mapped to {resp.choices[0].finish_reason}, expected {expected}"
+        )
+
+
+def test_transform_response_synthesizes_created_field():
+    """Anthropic doesn't return a 'created' timestamp; we synthesize one."""
+    raw = {
+        "id": "x",
+        "model": "claude-sonnet-4-6",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    p = AnthropicProvider()
+    resp = p.transform_response(raw, "claude-sonnet-4-6")
+    assert resp.created > 0  # any positive integer (current time)

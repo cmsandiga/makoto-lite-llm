@@ -1,7 +1,24 @@
+import json
 import os
+import time
 
 from app.sdk.providers.base import BaseProvider, register_provider
-from app.sdk.types import ModelResponse, ModelResponseStream
+from app.sdk.types import (
+    Choice,
+    FunctionCall,
+    Message,
+    ModelResponse,
+    ModelResponseStream,
+    ToolCall,
+    Usage,
+)
+
+_STOP_REASON_MAP = {
+    "end_turn": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+    "stop_sequence": "stop",
+}
 
 DEFAULT_API_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -117,7 +134,61 @@ class AnthropicProvider(BaseProvider):
         return body
 
     def transform_response(self, raw: dict, model: str) -> ModelResponse:
-        raise NotImplementedError  # implemented in Task 2
+        # Collapse content blocks
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for block in raw.get("content", []):
+            btype = block.get("type")
+            if btype == "text":
+                text_parts.append(block.get("text", ""))
+            elif btype == "tool_use":
+                tool_calls.append(
+                    ToolCall(
+                        id=block["id"],
+                        type="function",
+                        function=FunctionCall(
+                            name=block["name"],
+                            arguments=json.dumps(block.get("input", {})),
+                        ),
+                    )
+                )
+        content = "".join(text_parts) if text_parts else None
+
+        # Map stop_reason; passthrough unknown values
+        anthropic_reason = raw.get("stop_reason")
+        finish_reason = (
+            _STOP_REASON_MAP.get(anthropic_reason, anthropic_reason)
+            if anthropic_reason is not None
+            else None
+        )
+
+        # Build Usage
+        u = raw.get("usage") or {}
+        prompt_tokens = u.get("input_tokens", 0)
+        completion_tokens = u.get("output_tokens", 0)
+        usage = Usage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+
+        choice = Choice(
+            index=0,
+            message=Message(
+                role="assistant",
+                content=content,
+                tool_calls=tool_calls or None,
+            ),
+            finish_reason=finish_reason,
+        )
+
+        return ModelResponse(
+            id=raw["id"],
+            created=int(time.time()),
+            model=raw.get("model", model),
+            choices=[choice],
+            usage=usage,
+        )
 
     def transform_stream_chunk(
         self, chunk: dict, model: str
