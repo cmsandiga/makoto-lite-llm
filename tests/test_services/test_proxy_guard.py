@@ -1,3 +1,8 @@
+import pytest
+from fastapi import HTTPException
+
+from app.config import Settings
+from app.schemas.wire_in.chat import ChatMessage
 from app.sdk.exceptions import (
     AuthenticationError,
     BadRequestError,
@@ -13,7 +18,16 @@ from app.sdk.exceptions import (
 from app.sdk.exceptions import (
     TimeoutError as SdkTimeoutError,
 )
-from app.services.proxy_guard import map_sdk_error
+from app.services.proxy_guard import (
+    enforce_model_access,
+    estimate_input_tokens,
+    map_sdk_error,
+    resolve_provider_api_key,
+)
+
+# ============================================================================
+# map_sdk_error
+# ============================================================================
 
 
 def _assert_mapped(exc, expected_status, expected_type, expected_code):
@@ -100,3 +114,67 @@ def test_map_litellm_error_fallback():
         LiteLLMError(418, "teapot"),
         500, "api_error", "unknown_error",
     )
+
+
+# ============================================================================
+# enforce_model_access
+# ============================================================================
+
+
+class _Stub:
+    """Minimal stand-in for ApiKey/Team/Org with allowed_models."""
+
+    def __init__(self, allowed_models=None):
+        self.allowed_models = allowed_models
+
+
+def test_enforce_model_access_allowed():
+    api_key = _Stub(allowed_models=["openai/gpt-4o-mini"])
+    enforce_model_access("openai/gpt-4o-mini", api_key, None, None)
+
+
+def test_enforce_model_access_denied_raises_403():
+    api_key = _Stub(allowed_models=["openai/gpt-4o-mini"])
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_model_access("openai/gpt-4o", api_key, None, None)
+    assert exc_info.value.status_code == 403
+    assert "openai/gpt-4o" in exc_info.value.detail
+
+
+# ============================================================================
+# resolve_provider_api_key
+# ============================================================================
+
+
+def test_resolve_openai_key():
+    s = Settings(openai_api_key="sk-test-openai")
+    assert resolve_provider_api_key("openai", s) == "sk-test-openai"
+
+
+def test_resolve_anthropic_key():
+    s = Settings(anthropic_api_key="sk-ant-test")
+    assert resolve_provider_api_key("anthropic", s) == "sk-ant-test"
+
+
+def test_resolve_missing_key_raises_503():
+    s = Settings(openai_api_key=None, anthropic_api_key=None)
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_provider_api_key("openai", s)
+    assert exc_info.value.status_code == 503
+    assert "openai" in exc_info.value.detail.lower()
+
+
+# ============================================================================
+# estimate_input_tokens
+# ============================================================================
+
+
+def test_estimate_input_tokens_basic():
+    short = [ChatMessage(role="user", content="hi")]
+    long = [ChatMessage(role="user", content="x" * 4000)]
+    short_estimate = estimate_input_tokens(short)
+    long_estimate = estimate_input_tokens(long)
+    assert short_estimate >= 1
+    assert long_estimate > short_estimate
+    # Order of magnitude: ~4000 chars ≈ ~1000 tokens (chars/4 heuristic)
+    assert long_estimate >= 800
