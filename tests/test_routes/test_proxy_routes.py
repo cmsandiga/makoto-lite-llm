@@ -525,3 +525,125 @@ async def test_chat_completion_streaming_partial_log_on_no_finish(
     )
     log = result.scalar_one()
     assert log.status == "partial"
+
+
+# ============================================================================
+# Upstream error → OpenAI-shape error response (integration tests)
+# ============================================================================
+
+
+@respx.mock
+async def test_upstream_401_maps_to_401(client, proxy_key, openai_key_set):
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            401, json={"error": {"message": "bad upstream key"}}
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 401
+    body = resp.json()
+    assert body["error"]["type"] == "invalid_request_error"
+    assert body["error"]["code"] == "invalid_api_key"
+
+
+@respx.mock
+async def test_upstream_429_maps_to_429(client, proxy_key, openai_key_set):
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            429, json={"error": {"message": "slow down"}}
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["error"]["type"] == "rate_limit_error"
+
+
+@respx.mock
+async def test_upstream_400_context_maps_to_400_context(
+    client, proxy_key, openai_key_set
+):
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "context too long",
+                    "code": "context_length_exceeded",
+                }
+            },
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error"]["code"] == "context_length_exceeded"
+
+
+@respx.mock
+async def test_upstream_500_maps_to_502_upstream_error(
+    client, proxy_key, openai_key_set
+):
+    """Upstream 5xx → we return 502 'upstream_error' to clients."""
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            500, json={"error": {"message": "boom"}}
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["error"]["code"] == "upstream_error"
+
+
+@respx.mock
+async def test_upstream_503_maps_to_503(client, proxy_key, openai_key_set):
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            503, json={"error": {"message": "down"}}
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["error"]["code"] == "service_unavailable"
