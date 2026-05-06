@@ -231,3 +231,61 @@ async def test_check_rate_limit_tpm_exceeded_raises_429():
     with pytest.raises(HTTPException) as exc_info:
         await check_rate_limit(api_key, estimated_tokens=60)
     assert exc_info.value.status_code == 429
+
+
+# ============================================================================
+# check_budget (requires running Postgres testcontainer — Docker/Colima)
+# ============================================================================
+
+from datetime import date  # noqa: E402
+
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+from uuid_extensions import uuid7  # noqa: E402
+
+from app.models.spend import DailyKeySpend  # noqa: E402
+from app.services.proxy_guard import check_budget  # noqa: E402
+
+
+class _ApiKeyWithBudget:
+    """Lightweight fake of ApiKey that exposes only the fields check_budget reads."""
+
+    def __init__(self, api_key_hash="hash1", max_budget=None):
+        self.api_key_hash = api_key_hash
+        self.max_budget = max_budget
+
+
+async def _seed_daily_spend(
+    db: AsyncSession, api_key_hash: str, spent: float, model: str = "openai/gpt-4o-mini"
+):
+    row = DailyKeySpend(
+        id=uuid7(),
+        api_key_hash=api_key_hash,
+        date=date.today(),
+        model=model,
+        total_spend=spent,
+        total_input_tokens=0,
+        total_output_tokens=0,
+        request_count=1,
+    )
+    db.add(row)
+    await db.commit()
+
+
+async def test_check_budget_no_max_budget_no_op(db_session: AsyncSession):
+    api_key = _ApiKeyWithBudget(max_budget=None)
+    await check_budget(db_session, api_key)
+
+
+async def test_check_budget_under_budget_allows(db_session: AsyncSession):
+    api_key = _ApiKeyWithBudget(api_key_hash="hashU", max_budget=0.10)
+    await _seed_daily_spend(db_session, "hashU", spent=0.05)
+    await check_budget(db_session, api_key)
+
+
+async def test_check_budget_over_budget_raises_429(db_session: AsyncSession):
+    api_key = _ApiKeyWithBudget(api_key_hash="hashO", max_budget=0.10)
+    await _seed_daily_spend(db_session, "hashO", spent=0.15)
+    with pytest.raises(HTTPException) as exc_info:
+        await check_budget(db_session, api_key)
+    assert exc_info.value.status_code == 429
+    assert "0.15" in exc_info.value.detail or "0.1500" in exc_info.value.detail

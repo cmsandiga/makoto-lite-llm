@@ -1,8 +1,12 @@
 import json
+from datetime import date
 
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.models.spend import DailyKeySpend
 from app.schemas.wire_in.chat import ChatMessage
 from app.sdk.exceptions import (
     AuthenticationError,
@@ -167,3 +171,35 @@ async def check_rate_limit(api_key, estimated_tokens: int) -> None:
                 detail="Rate limit exceeded (TPM)",
                 headers={"Retry-After": str(int(result.retry_after) + 1)},
             )
+
+
+async def check_budget(db: AsyncSession, api_key) -> None:
+    """Enforce daily budget against spend recorded in DailyKeySpend.
+
+    Reads the sum of today's spend rows for this API key (across models)
+    and compares to api_key.max_budget. Raises HTTPException(429) on exceed.
+
+    Scope: key-level only. Team/org budgets deferred to a future ola.
+    Race condition: spend updates lag the request, so a key can briefly
+    overspend by one or two requests under concurrency. Documented in spec.
+    """
+    if api_key.max_budget is None:
+        return
+
+    today = date.today()
+    result = await db.execute(
+        select(DailyKeySpend.total_spend).where(
+            DailyKeySpend.api_key_hash == api_key.api_key_hash,
+            DailyKeySpend.date == today,
+        )
+    )
+    rows = result.scalars().all()
+    spent_today = sum(rows) if rows else 0.0
+
+    if spent_today >= api_key.max_budget:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Daily budget exceeded: ${spent_today:.4f} / ${api_key.max_budget}"
+            ),
+        )
