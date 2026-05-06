@@ -1,0 +1,394 @@
+from datetime import date
+
+import httpx
+import pytest
+import respx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid_extensions import uuid7
+
+from app.auth.api_key_auth import generate_api_key, get_key_prefix, hash_api_key
+from app.auth.dependencies import _api_key_cache
+from app.config import settings
+from app.models.api_key import ApiKey
+from app.models.spend import DailyKeySpend, SpendLog
+from app.models.user import User
+from app.sdk import http_client as sdk_http_client
+
+
+@pytest.fixture(autouse=True)
+def _reset_singletons():
+    """Reset SDK pooled client + rate limiter singletons + auth cache between tests."""
+    sdk_http_client._default_client = None
+    _api_key_cache.clear()
+    from app.services import proxy_guard
+    from app.services.rate_limiter import SlidingWindowRateLimiter
+
+    proxy_guard._rate_limiter = SlidingWindowRateLimiter()
+    yield
+    sdk_http_client._default_client = None
+    _api_key_cache.clear()
+    proxy_guard._rate_limiter = SlidingWindowRateLimiter()
+
+
+@pytest.fixture
+async def proxy_user(db_session: AsyncSession):
+    user = User(email="proxy-tester@test.com", role="member")
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+@pytest.fixture
+async def proxy_key(db_session: AsyncSession, proxy_user: User):
+    """An ApiKey with no rate-limit/budget restrictions."""
+    raw_key = generate_api_key()
+    api_key = ApiKey(
+        api_key_hash=hash_api_key(raw_key),
+        key_prefix=get_key_prefix(raw_key),
+        user_id=proxy_user.id,
+    )
+    db_session.add(api_key)
+    await db_session.commit()
+    return raw_key, api_key
+
+
+@pytest.fixture
+def openai_key_set(monkeypatch):
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test-openai")
+
+
+@respx.mock
+async def test_chat_completion_happy_path_openai(
+    client, proxy_key, openai_key_set, db_session
+):
+    raw_key, api_key = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-1",
+                "created": 1700000000,
+                "model": "gpt-4o-mini-2024-07-18",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 1,
+                    "total_tokens": 11,
+                },
+            },
+        )
+    )
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["choices"][0]["message"]["content"] == "ok"
+    assert body["usage"]["prompt_tokens"] == 10
+    assert body["usage"]["cost"] is not None
+    assert body["usage"]["cost"] > 0
+
+    result = await db_session.execute(
+        select(SpendLog).where(SpendLog.api_key_hash == api_key.api_key_hash)
+    )
+    log = result.scalar_one()
+    assert log.status == "completed"
+    assert log.input_tokens == 10
+    assert log.output_tokens == 1
+    assert log.spend > 0
+
+
+async def test_chat_completion_missing_authorization(client):
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert resp.status_code == 401
+    assert resp.json()["error"]["type"] == "api_error"
+
+
+async def test_chat_completion_invalid_api_key(client):
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": "Bearer sk-not-a-real-key"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_chat_completion_blocked_key(client, db_session, proxy_user):
+    raw_key = generate_api_key()
+    api_key = ApiKey(
+        api_key_hash=hash_api_key(raw_key),
+        key_prefix=get_key_prefix(raw_key),
+        user_id=proxy_user.id,
+        is_blocked=True,
+    )
+    db_session.add(api_key)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_chat_completion_model_not_in_allowlist(
+    client, db_session, proxy_user, openai_key_set
+):
+    raw_key = generate_api_key()
+    api_key = ApiKey(
+        api_key_hash=hash_api_key(raw_key),
+        key_prefix=get_key_prefix(raw_key),
+        user_id=proxy_user.id,
+        allowed_models=["openai/gpt-4o-mini"],
+    )
+    db_session.add(api_key)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 403
+    assert "openai/gpt-4o" in resp.json()["error"]["message"]
+
+
+@respx.mock
+async def test_chat_completion_rpm_exceeded(
+    client, db_session, proxy_user, openai_key_set
+):
+    raw_key = generate_api_key()
+    api_key = ApiKey(
+        api_key_hash=hash_api_key(raw_key),
+        key_prefix=get_key_prefix(raw_key),
+        user_id=proxy_user.id,
+        rpm_limit=1,
+    )
+    db_session.add(api_key)
+    await db_session.commit()
+
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+    )
+    # First call passes
+    resp1 = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp1.status_code == 200
+    # Second call same minute -> 429
+    resp2 = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp2.status_code == 429
+    assert "Retry-After" in resp2.headers
+
+
+async def test_chat_completion_budget_exceeded(
+    client, db_session, proxy_user, openai_key_set
+):
+    raw_key = generate_api_key()
+    key_hash = hash_api_key(raw_key)
+    api_key = ApiKey(
+        api_key_hash=key_hash,
+        key_prefix=get_key_prefix(raw_key),
+        user_id=proxy_user.id,
+        max_budget=0.01,
+    )
+    db_session.add(api_key)
+    spend_row = DailyKeySpend(
+        id=uuid7(),
+        api_key_hash=key_hash,
+        date=date.today(),
+        model="openai/gpt-4o-mini",
+        total_spend=0.015,
+        total_input_tokens=0,
+        total_output_tokens=0,
+        request_count=1,
+    )
+    db_session.add(spend_row)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 429
+    assert "budget" in resp.json()["error"]["message"].lower()
+
+
+async def test_chat_completion_provider_key_missing(
+    client, proxy_key, monkeypatch
+):
+    """Anthropic key not configured -> 503."""
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+    raw_key, _ = proxy_key
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anthropic/claude-haiku-4-5-20251001",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 503
+
+
+async def test_chat_completion_empty_messages_422(client, proxy_key, openai_key_set):
+    raw_key, _ = proxy_key
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"model": "openai/gpt-4o-mini", "messages": []},
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_chat_completion_missing_model_422(client, proxy_key, openai_key_set):
+    raw_key, _ = proxy_key
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 422
+
+
+@respx.mock
+async def test_chat_completion_anthropic_happy_path(
+    client, proxy_key, monkeypatch, db_session
+):
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    raw_key, _ = proxy_key
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-4-5-20251001",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+            },
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anthropic/claude-haiku-4-5-20251001",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["choices"][0]["message"]["content"] == "ok"
+    assert body["usage"]["prompt_tokens"] == 10
+
+
+@respx.mock
+async def test_chat_completion_request_id_header(
+    client, proxy_key, openai_key_set, db_session
+):
+    raw_key, _ = proxy_key
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+    )
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    assert resp.status_code == 200
+    request_id = resp.headers.get("X-Request-Id")
+    assert request_id is not None
+
+    result = await db_session.execute(
+        select(SpendLog).where(SpendLog.request_id == request_id)
+    )
+    assert result.scalar_one() is not None
