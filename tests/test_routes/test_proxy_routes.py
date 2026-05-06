@@ -392,3 +392,136 @@ async def test_chat_completion_request_id_header(
         select(SpendLog).where(SpendLog.request_id == request_id)
     )
     assert result.scalar_one() is not None
+
+
+@respx.mock
+async def test_chat_completion_streaming_openai(
+    client, proxy_key, openai_key_set, db_session
+):
+    """Stream from OpenAI: assert SSE chunks are emitted and spend logged."""
+    raw_key, api_key = proxy_key
+    body_bytes = (
+        b'data: {"id":"c1","created":1,"model":"gpt-4o-mini","choices":'
+        b'[{"index":0,"delta":{"role":"assistant","content":"He"}}]}\n\n'
+        b'data: {"id":"c1","created":1,"model":"gpt-4o-mini","choices":'
+        b'[{"index":0,"delta":{"content":"llo"},"finish_reason":"stop"}],'
+        b'"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n\n'
+        b'data: [DONE]\n\n'
+    )
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, content=body_bytes, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    async with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    ) as resp:
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        events = [line async for line in resp.aiter_lines()]
+
+    data_lines = [e for e in events if e.startswith("data:")]
+    assert len(data_lines) >= 3
+    assert data_lines[-1].strip() == "data: [DONE]"
+
+    result = await db_session.execute(
+        select(SpendLog).where(SpendLog.api_key_hash == api_key.api_key_hash)
+    )
+    log = result.scalar_one()
+    assert log.input_tokens == 5
+    assert log.output_tokens == 2
+    assert log.status == "completed"
+
+
+@respx.mock
+async def test_chat_completion_streaming_anthropic(
+    client, proxy_key, monkeypatch, db_session
+):
+    """Stream from Anthropic: SSE events with both 'event:' and 'data:' lines."""
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    raw_key, _ = proxy_key
+    body_bytes = (
+        b'event: message_start\n'
+        b'data: {"type":"message_start","message":'
+        b'{"id":"msg_1","model":"claude-haiku-4-5-20251001",'
+        b'"usage":{"input_tokens":5,"output_tokens":0}}}\n\n'
+        b'event: content_block_delta\n'
+        b'data: {"type":"content_block_delta","index":0,'
+        b'"delta":{"type":"text_delta","text":"He"}}\n\n'
+        b'event: content_block_delta\n'
+        b'data: {"type":"content_block_delta","index":0,'
+        b'"delta":{"type":"text_delta","text":"llo"}}\n\n'
+        b'event: message_delta\n'
+        b'data: {"type":"message_delta",'
+        b'"delta":{"stop_reason":"end_turn"},'
+        b'"usage":{"output_tokens":3}}\n\n'
+        b'event: message_stop\n'
+        b'data: {"type":"message_stop"}\n\n'
+    )
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200, content=body_bytes, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    async with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "anthropic/claude-haiku-4-5-20251001",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    ) as resp:
+        assert resp.status_code == 200
+        events = [line async for line in resp.aiter_lines()]
+
+    data_lines = [e for e in events if e.startswith("data:")]
+    assert len(data_lines) >= 3
+    assert data_lines[-1].strip() == "data: [DONE]"
+
+
+@respx.mock
+async def test_chat_completion_streaming_partial_log_on_no_finish(
+    client, proxy_key, openai_key_set, db_session
+):
+    """No finish_reason in chunks → spend log status='partial'."""
+    raw_key, api_key = proxy_key
+    body_bytes = (
+        b'data: {"id":"c1","created":1,"model":"gpt-4o-mini","choices":'
+        b'[{"index":0,"delta":{"content":"He"}}]}\n\n'
+        b'data: [DONE]\n\n'
+    )
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, content=body_bytes, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    async with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "openai/gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": f"Bearer {raw_key}"},
+    ) as resp:
+        async for _ in resp.aiter_lines():
+            pass
+
+    result = await db_session.execute(
+        select(SpendLog).where(SpendLog.api_key_hash == api_key.api_key_hash)
+    )
+    log = result.scalar_one()
+    assert log.status == "partial"
