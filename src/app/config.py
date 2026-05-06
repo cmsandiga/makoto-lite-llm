@@ -31,5 +31,9 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     sso_dashboard_redirect_url: str = "http://localhost:3000/auth/callback"
 
+    # Upstream LLM provider keys (used by the proxy when dispatching via the SDK)
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+
 
 settings = Settings()
