@@ -2,7 +2,7 @@ import pytest
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.api_key_auth import generate_api_key
+from app.auth.api_key_auth import generate_api_key, get_key_prefix, hash_api_key
 from app.auth.dependencies import _api_key_cache, get_current_api_key
 from app.models.api_key import ApiKey
 from app.models.user import User
@@ -32,11 +32,12 @@ async def test_get_current_api_key_returns_apikey_for_sk(db_session: AsyncSessio
     db_session.add(user)
     await db_session.flush()
 
-    raw_key, key_hash = generate_api_key()
+    raw_key = generate_api_key()
+    key_hash = hash_api_key(raw_key)
     api_key = ApiKey(
         api_key_hash=key_hash,
+        key_prefix=get_key_prefix(raw_key),
         user_id=user.id,
-        name="test",
     )
     db_session.add(api_key)
     await db_session.commit()
