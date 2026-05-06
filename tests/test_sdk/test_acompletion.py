@@ -220,3 +220,87 @@ def test_public_imports():
     assert callable(acompletion)
     assert isinstance(ModelResponse, type)
     assert issubclass(AuthenticationError, LiteLLMError)
+
+
+@respx.mock
+async def test_acompletion_anthropic_happy_path():
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-4-5-20251001",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+            },
+        )
+    )
+
+    resp = await acompletion(
+        model="anthropic/claude-haiku-4-5-20251001",
+        messages=[{"role": "user", "content": "hi"}],
+        api_key="sk-ant-test",
+        max_tokens=10,
+    )
+    assert isinstance(resp, ModelResponse)
+    assert resp.choices[0].message.content == "ok"
+    assert resp.usage.prompt_tokens == 10
+    assert resp.usage.completion_tokens == 1
+    # Cost computed by dispatcher using the catalog
+    assert resp.usage.cost is not None
+    # 10 * 8.0e-7 + 1 * 4.0e-6 = 8e-6 + 4e-6 = 1.2e-5
+    assert resp.usage.cost == pytest.approx(1.2e-5, rel=1e-9)
+
+
+@respx.mock
+async def test_acompletion_anthropic_streaming_returns_wrapper():
+    body = (
+        b'event: message_start\n'
+        b'data: {"type":"message_start","message":'
+        b'{"id":"msg_1","model":"claude-haiku-4-5-20251001",'
+        b'"usage":{"input_tokens":5,"output_tokens":0}}}\n\n'
+        b'event: content_block_start\n'
+        b'data: {"type":"content_block_start","index":0,'
+        b'"content_block":{"type":"text","text":""}}\n\n'
+        b'event: content_block_delta\n'
+        b'data: {"type":"content_block_delta","index":0,'
+        b'"delta":{"type":"text_delta","text":"He"}}\n\n'
+        b'event: content_block_delta\n'
+        b'data: {"type":"content_block_delta","index":0,'
+        b'"delta":{"type":"text_delta","text":"llo"}}\n\n'
+        b'event: content_block_stop\n'
+        b'data: {"type":"content_block_stop","index":0}\n\n'
+        b'event: message_delta\n'
+        b'data: {"type":"message_delta",'
+        b'"delta":{"stop_reason":"end_turn"},'
+        b'"usage":{"output_tokens":3}}\n\n'
+        b'event: message_stop\n'
+        b'data: {"type":"message_stop"}\n\n'
+    )
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    result = await acompletion(
+        model="anthropic/claude-haiku-4-5-20251001",
+        messages=[{"role": "user", "content": "hi"}],
+        api_key="sk-ant-test",
+        stream=True,
+    )
+    assert isinstance(result, StreamWrapper)
+
+    chunks: list[ModelResponseStream] = []
+    async for chunk in result:
+        chunks.append(chunk)
+
+    # Expected chunks: 2 text deltas + 1 message_delta = 3 yielded
+    # (message_start, content_block_start, content_block_stop, message_stop return None)
+    assert len(chunks) == 3
+    assert chunks[0].choices[0].delta.content == "He"
+    assert chunks[1].choices[0].delta.content == "llo"
+    assert chunks[2].choices[0].finish_reason == "stop"
