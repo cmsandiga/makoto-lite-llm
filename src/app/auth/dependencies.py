@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Request
@@ -36,7 +36,7 @@ async def _lookup_api_key(db: AsyncSession, key_hash: str) -> ApiKey | None:
             (ApiKey.api_key_hash == key_hash)
             | (
                 (ApiKey.previous_key_hash == key_hash)
-                & (ApiKey.grace_period_expires_at > datetime.now(timezone.utc))
+                & (ApiKey.grace_period_expires_at > datetime.now(UTC))
             )
         )
     )
@@ -62,7 +62,7 @@ async def _authenticate_api_key(db: AsyncSession, raw_key: str) -> User:
 
     if api_key.is_blocked:
         raise HTTPException(status_code=401, detail="API key is blocked")
-    if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
+    if api_key.expires_at and api_key.expires_at < datetime.now(UTC):
         raise HTTPException(status_code=401, detail="API key has expired")
     if user is None or user.is_blocked:
         raise HTTPException(status_code=401, detail="Key owner not found or blocked")
@@ -169,3 +169,30 @@ def require_model_access(path_param: str = "model") -> Callable:
         return user
 
     return dependency
+
+
+async def get_current_api_key(
+    request: Request, db: AsyncSession = Depends(get_db)
+) -> ApiKey | None:
+    """Return the ApiKey for the current request, or None for JWT auth.
+
+    Reuses the existing _api_key_cache so this is essentially free when
+    paired with get_current_user (which warmed the cache). For JWT users,
+    returns None — proxy routes that need limits should treat this as
+    "no key-level constraints" (e.g., admins via JWT).
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ", 1)[1]
+    if not token.startswith("sk-"):
+        return None
+
+    key_hash = hash_api_key(token)
+    cached = _api_key_cache.get(key_hash)
+    if cached is not None:
+        api_key, _user = cached
+        return api_key
+
+    return await _lookup_api_key(db, key_hash)
