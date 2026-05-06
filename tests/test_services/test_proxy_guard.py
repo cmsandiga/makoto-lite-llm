@@ -19,11 +19,13 @@ from app.sdk.exceptions import (
     TimeoutError as SdkTimeoutError,
 )
 from app.services.proxy_guard import (
+    check_rate_limit,
     enforce_model_access,
     estimate_input_tokens,
     map_sdk_error,
     resolve_provider_api_key,
 )
+from app.services.rate_limiter import SlidingWindowRateLimiter
 
 # ============================================================================
 # map_sdk_error
@@ -178,3 +180,54 @@ def test_estimate_input_tokens_basic():
     assert long_estimate > short_estimate
     # Order of magnitude: ~4000 chars ≈ ~1000 tokens (chars/4 heuristic)
     assert long_estimate >= 800
+
+
+# ============================================================================
+# check_rate_limit
+# ============================================================================
+
+
+class _ApiKeyStub:
+    def __init__(self, api_key_hash="hash1", rpm_limit=None, tpm_limit=None):
+        self.api_key_hash = api_key_hash
+        self.rpm_limit = rpm_limit
+        self.tpm_limit = tpm_limit
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Each test gets a fresh limiter so windows don't bleed across tests."""
+    from app.services import proxy_guard
+
+    proxy_guard._rate_limiter = SlidingWindowRateLimiter()
+    yield
+    proxy_guard._rate_limiter = SlidingWindowRateLimiter()
+
+
+async def test_check_rate_limit_no_limits_no_op():
+    """ApiKey with rpm_limit=None and tpm_limit=None passes immediately."""
+    api_key = _ApiKeyStub(rpm_limit=None, tpm_limit=None)
+    await check_rate_limit(api_key, estimated_tokens=100)
+
+
+async def test_check_rate_limit_rpm_allows():
+    api_key = _ApiKeyStub(rpm_limit=5, tpm_limit=None)
+    await check_rate_limit(api_key, estimated_tokens=10)
+
+
+async def test_check_rate_limit_rpm_exceeded_raises_429():
+    api_key = _ApiKeyStub(rpm_limit=2, tpm_limit=None)
+    await check_rate_limit(api_key, estimated_tokens=1)
+    await check_rate_limit(api_key, estimated_tokens=1)
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(api_key, estimated_tokens=1)
+    assert exc_info.value.status_code == 429
+    assert "Retry-After" in exc_info.value.headers
+
+
+async def test_check_rate_limit_tpm_exceeded_raises_429():
+    api_key = _ApiKeyStub(rpm_limit=None, tpm_limit=100)
+    await check_rate_limit(api_key, estimated_tokens=50)
+    with pytest.raises(HTTPException) as exc_info:
+        await check_rate_limit(api_key, estimated_tokens=60)
+    assert exc_info.value.status_code == 429

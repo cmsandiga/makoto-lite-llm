@@ -20,6 +20,17 @@ from app.sdk.exceptions import (
     TimeoutError as SdkTimeoutError,
 )
 from app.services.permission_service import resolve_model_access
+from app.services.rate_limiter import SlidingWindowRateLimiter
+
+_rate_limiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter()
+
+
+def get_rate_limiter() -> SlidingWindowRateLimiter:
+    """Return the singleton sliding-window rate limiter.
+
+    Tests reset _rate_limiter directly to isolate windows.
+    """
+    return _rate_limiter
 
 
 def map_sdk_error(exc: LiteLLMError) -> tuple[int, dict]:
@@ -117,3 +128,42 @@ def estimate_input_tokens(messages: list[ChatMessage]) -> int:
     """
     serialized = json.dumps([m.model_dump() for m in messages])
     return max(1, len(serialized) // 4)
+
+
+async def check_rate_limit(api_key, estimated_tokens: int) -> None:
+    """Enforce RPM and TPM limits on the given ApiKey.
+
+    Raises HTTPException(429) with Retry-After header on the first
+    exceeded limit. Order: RPM check, then TPM check.
+
+    Scope: key-level only. Team and org limits are documented on the model
+    but not enforced here; precedence rule is a future-ola decision.
+    """
+    limiter = get_rate_limiter()
+
+    if api_key.rpm_limit is not None:
+        result = await limiter.check_rate_limit(
+            f"rpm:{api_key.api_key_hash}",
+            api_key.rpm_limit,
+            window_seconds=60,
+        )
+        if not result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded (RPM)",
+                headers={"Retry-After": str(int(result.retry_after) + 1)},
+            )
+
+    if api_key.tpm_limit is not None:
+        result = await limiter.check_rate_limit(
+            f"tpm:{api_key.api_key_hash}",
+            api_key.tpm_limit,
+            window_seconds=60,
+            increment=estimated_tokens,
+        )
+        if not result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded (TPM)",
+                headers={"Retry-After": str(int(result.retry_after) + 1)},
+            )
